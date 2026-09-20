@@ -37,7 +37,7 @@ type RevokedEntry struct {
 }
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
 	if err != nil {
 		return nil, err
 	}
@@ -120,8 +120,14 @@ func (s *Store) NextCRLNumber() (*big.Int, error) {
 }
 
 func (s *Store) metaCounter(key string) (*big.Int, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+
 	var current string
-	err := s.db.QueryRow(`SELECT value FROM meta WHERE key = ?`, key).Scan(&current)
+	err = tx.QueryRow(`SELECT value FROM meta WHERE key = ?`, key).Scan(&current)
 	if err == sql.ErrNoRows {
 		current = "01"
 	} else if err != nil {
@@ -132,10 +138,13 @@ func (s *Store) metaCounter(key string) (*big.Int, error) {
 		n = big.NewInt(1)
 	}
 	next := new(big.Int).Add(n, big.NewInt(1))
-	if _, err := s.db.Exec(
+	if _, err := tx.Exec(
 		`INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
 		key, fmt.Sprintf("%02x", next),
 	); err != nil {
+		return nil, err
+	}
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
 	return n, nil
