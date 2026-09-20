@@ -41,6 +41,8 @@ func (l *Logger) SetWriter(writer io.Writer) {
 }
 
 func (l *Logger) log(level Level, format string, a ...any) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
 	if level > l.level {
 		return
 	}
@@ -49,8 +51,6 @@ func (l *Logger) log(level Level, format string, a ...any) {
 		label = colorize(level, label)
 	}
 	message := strings.TrimSuffix(fmt.Sprintf(format, a...), "\n")
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	fmt.Fprintf(l.writer, "%s %s\n", label, message)
 }
 
