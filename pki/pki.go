@@ -109,8 +109,18 @@ func GenerateKey(cipher string, bits int) (crypto.Signer, []byte, error) {
 }
 
 func EnsureKey(path, cipher string, bits int) (crypto.Signer, error) {
+	if err := ValidateCipher(cipher); err != nil {
+		return nil, err
+	}
 	if Exists(path) {
-		return LoadKey(path)
+		key, err := LoadKey(path)
+		if err != nil {
+			return nil, err
+		}
+		if got := KeyCipher(key.Public()); got != cipher {
+			return nil, fmt.Errorf("existing key %s is %s, not %s", path, got, cipher)
+		}
+		return key, nil
 	}
 	key, keyPEM, err := GenerateKey(cipher, bits)
 	if err != nil {
@@ -185,13 +195,32 @@ func EncodeCert(der []byte) []byte {
 
 func EnsureCSR(path string, subject pkix.Name, dnsNames []string, signer crypto.Signer) error {
 	if Exists(path) {
-		return nil
+		existing, err := LoadCSR(path)
+		if err == nil && existing.Subject.String() == subject.String() && sameStringSet(existing.DNSNames, dnsNames) {
+			return nil
+		}
 	}
 	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: subject, DNSNames: dnsNames}, signer)
 	if err != nil {
 		return err
 	}
 	return WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der}), 0644)
+}
+
+func sameStringSet(a, b []string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	set := make(map[string]struct{}, len(a))
+	for _, value := range a {
+		set[value] = struct{}{}
+	}
+	for _, value := range b {
+		if _, ok := set[value]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func RandomSerial() (*big.Int, error) {

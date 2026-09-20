@@ -263,8 +263,8 @@ xcert <子命令> [参数]
 
 - 计算通用名称 `CN`，确定输出目录 `<dir>/certs/<CN>_<cipher>`。
 - 若该目录下已存在 `fullchain.cer`，输出已存在的警告并直接返回。
-- 若 `<CN>.key` 不存在，则按 `--cipher` 生成私钥。
-- 若 `<CN>.csr` 不存在，则生成证书请求，其中包含与证书一致的 `subjectAltName`。
+- 若 `<CN>.key` 不存在，则按 `--cipher` 生成私钥；已存在的私钥类型与 `--cipher` 不一致时报错。
+- 若 `<CN>.csr` 不存在，则生成证书请求，其中包含与证书一致的 `subjectAltName`；已存在的证书请求与当前主体或 `subjectAltName` 不一致时会重新生成。
 - 使用 CA 证书与私钥签发 `<CN>.cer`。
 - 用于签发的 CA 证书必须为 CA 证书且允许证书签名，否则报错。
 - 生成 `<CN>` 的完整证书链 `fullchain.cer`，内容为 `<CN>.cer` 与 `--chain` 指定文件内容的拼接。
