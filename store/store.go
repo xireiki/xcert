@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"xcert/log"
+	"github.com/xireiki/xcert/log"
 
 	_ "modernc.org/sqlite"
 )

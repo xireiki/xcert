@@ -3,7 +3,7 @@ package main
 import (
 	"os"
 
-	"xcert/log"
+	"github.com/xireiki/xcert/log"
 )
 
 func main() {

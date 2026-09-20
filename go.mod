@@ -1,4 +1,4 @@
-module xcert
+module github.com/xireiki/xcert
 
 go 1.27
 

@@ -11,10 +11,10 @@ import (
 	"text/tabwriter"
 	"time"
 
-	"xcert/log"
-	"xcert/option"
-	"xcert/pki"
-	"xcert/store"
+	"github.com/xireiki/xcert/log"
+	"github.com/xireiki/xcert/option"
+	"github.com/xireiki/xcert/pki"
+	"github.com/xireiki/xcert/store"
 
 	"github.com/spf13/cobra"
 )

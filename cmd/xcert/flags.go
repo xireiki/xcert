@@ -3,7 +3,7 @@ package main
 import (
 	"fmt"
 
-	"xcert/option"
+	"github.com/xireiki/xcert/option"
 
 	"github.com/spf13/cobra"
 )

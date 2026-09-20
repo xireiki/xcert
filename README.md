@@ -35,6 +35,12 @@ go build -o xcert ./cmd/xcert
 make install
 ```
 
+或直接从仓库安装：
+
+```sh
+go install github.com/xireiki/xcert/cmd/xcert@latest
+```
+
 运行测试：
 
 ```sh

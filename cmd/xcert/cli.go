@@ -5,8 +5,8 @@ import (
 	"os"
 	"path/filepath"
 
-	"xcert/log"
-	"xcert/store"
+	"github.com/xireiki/xcert/log"
+	"github.com/xireiki/xcert/store"
 
 	"github.com/spf13/cobra"
 )

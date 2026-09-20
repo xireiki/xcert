@@ -11,7 +11,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"xcert/store"
+	"github.com/xireiki/xcert/store"
 )
 
 func TestChain(t *testing.T) {

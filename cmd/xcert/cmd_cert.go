@@ -11,9 +11,9 @@ import (
 	"time"
 	"unicode"
 
-	"xcert/log"
-	"xcert/option"
-	"xcert/pki"
+	"github.com/xireiki/xcert/log"
+	"github.com/xireiki/xcert/option"
+	"github.com/xireiki/xcert/pki"
 
 	"github.com/spf13/cobra"
 )
