@@ -10,7 +10,7 @@ import (
 
 func addKeyFlags(cmd *cobra.Command, o *option.KeyOptions, defaults option.KeyOptions) {
 	f := cmd.Flags()
-	f.StringVarP(&o.Cipher, "cipher", "C", defaults.Cipher, "private key cipher (ecc, rsa)")
+	f.StringVarP(&o.Cipher, "cipher", "C", defaults.Cipher, "private key cipher (ecc, rsa, ed25519)")
 	f.IntVar(&o.Bits, "rsa-bits", defaults.Bits, "key length for RSA private keys")
 	f.StringVarP(&o.Subject, "subject", "s", defaults.Subject, "subject information")
 	f.IntVar(&o.Days, "days", defaults.Days, "expiration time in days")

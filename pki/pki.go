@@ -72,10 +72,10 @@ func ParseSubject(s string) pkix.Name {
 
 func ValidateCipher(cipher string) error {
 	switch cipher {
-	case "ecc", "rsa":
+	case "ecc", "rsa", "ed25519":
 		return nil
 	default:
-		return fmt.Errorf("unsupported cipher %q, supported: ecc, rsa", cipher)
+		return fmt.Errorf("unsupported cipher %q, supported: ecc, rsa, ed25519", cipher)
 	}
 }
 
@@ -94,6 +94,16 @@ func GenerateKey(cipher string, bits int) (crypto.Signer, []byte, error) {
 			return nil, nil, err
 		}
 		return key, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), nil
+	case "ed25519":
+		_, key, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			return nil, nil, err
+		}
+		der, err := x509.MarshalPKCS8PrivateKey(key)
+		if err != nil {
+			return nil, nil, err
+		}
+		return key, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der}), nil
 	case "rsa":
 		if bits < 2048 {
 			return nil, nil, fmt.Errorf("RSA key length too small: %d, minimum is 2048", bits)
@@ -104,7 +114,7 @@ func GenerateKey(cipher string, bits int) (crypto.Signer, []byte, error) {
 		}
 		return key, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), nil
 	default:
-		return nil, nil, fmt.Errorf("unsupported cipher %q, supported: ecc, rsa", cipher)
+		return nil, nil, fmt.Errorf("unsupported cipher %q, supported: ecc, rsa, ed25519", cipher)
 	}
 }
 
@@ -152,6 +162,8 @@ func LoadKey(path string) (crypto.Signer, error) {
 		case *rsa.PrivateKey:
 			return k, nil
 		case *ecdsa.PrivateKey:
+			return k, nil
+		case ed25519.PrivateKey:
 			return k, nil
 		}
 	}
@@ -303,6 +315,8 @@ func SignatureAlgorithm(digest string, key crypto.Signer) (x509.SignatureAlgorit
 		case "sha512", "":
 			return x509.ECDSAWithSHA512, nil
 		}
+	case ed25519.PrivateKey:
+		return x509.PureEd25519, nil
 	}
 	return x509.UnknownSignatureAlgorithm, fmt.Errorf("unsupported digest %q for this key type", digest)
 }

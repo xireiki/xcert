@@ -148,7 +148,7 @@ xcert <子命令> [参数]
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa`。其他取值会报错 |
+| `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc`、`rsa` 或 `ed25519`。其他取值会报错 |
 | `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数，仅在 `--cipher rsa` 时生效，最小 2048 |
 | `-s`, `--subject` | `/C=CN/O=Test SSL/CN=Test SSL CA` | 证书主体信息 |
 | `--days` | `3650` | 证书有效期，单位为天，必须为正数 |
@@ -188,7 +188,7 @@ xcert <子命令> [参数]
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa` |
+| `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc`、`rsa` 或 `ed25519` |
 | `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数，最小 2048 |
 | `-s`, `--subject` | `/C=CN/O=Test SSL/CN=Test Inte CA` | 证书主体信息 |
 | `--days` | `1825` | 证书有效期，单位为天，必须为正数 |
@@ -238,7 +238,7 @@ xcert <子命令> [参数]
 
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
-| `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa` |
+| `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc`、`rsa` 或 `ed25519` |
 | `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数，最小 2048 |
 | `-s`, `--subject` | `/C=CN` | 证书主体信息 |
 | `--days` | `90` | 证书有效期，单位为天，必须为正数 |
@@ -423,6 +423,7 @@ CA 路径长度限制。取值 `-1` 表示不写入路径长度限制；`0` 表�
 ## 密钥与文件格式
 
 - ECC 私钥：secp256r1（prime256v1 / P-256），PEM 类型 `EC PRIVATE KEY`
+- ed25519 私钥：PEM 类型 `PRIVATE KEY`（PKCS#8）
 - RSA 私钥：PEM 类型 `RSA PRIVATE KEY`（PKCS#1）
 - 证书：PEM 类型 `CERTIFICATE`
 - 证书请求：PEM 类型 `CERTIFICATE REQUEST`
