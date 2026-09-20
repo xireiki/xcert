@@ -6,6 +6,8 @@ An X.509 certificate issuance tool written in Go. It generates self-signed root 
 
 All key and certificate operations are implemented with the Go standard library, with no external commands.
 
+> **Disclaimer**: This project is provided for internal management and technical research only. It has not undergone any security audit, and its correctness, security, or compliance is not guaranteed. Do not use this tool to issue certificates in production, in publicly trusted contexts, or in any scenario involving real business operations. Users must evaluate and bear all risks and consequences arising from the use of this project; the authors accept no liability for any loss or legal responsibility caused thereby.
+
 ## Contents
 
 - [Features](#features)
