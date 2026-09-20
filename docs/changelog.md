@@ -4,6 +4,8 @@
 
 ## [Unreleased]
 
+## [v0.1.0]
+
 ### 新增
 
 - `root`、`inte`、`cert` 子命令，用于生成根 CA、中间 CA 与域名证书。
@@ -26,3 +28,6 @@
 - 证书通用名称的路径安全校验，避免输出路径逃逸 CA 目录。
 - 删除证书时同步清理相关文件并刷新 CRL。
 - CRL 生成失败时回滚吊销状态，保持数据库与 CRL 一致。
+
+[Unreleased]: https://github.com/xireiki/xcert/compare/v0.1.0...HEAD
+[v0.1.0]: https://github.com/xireiki/xcert/releases/tag/v0.1.0
