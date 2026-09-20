@@ -154,7 +154,10 @@ func TestRecords(t *testing.T) {
 		t.Fatalf("unexpected revoked entries: %+v", revoked)
 	}
 
-	if _, err := s.Delete("a.test"); err != nil {
+	if _, err := s.Delete("a.test", false); err == nil {
+		t.Fatal("expected error deleting a revoked record without --force")
+	}
+	if _, err := s.Delete("a.test", true); err != nil {
 		t.Fatal(err)
 	}
 	records, err = s.List()
@@ -163,5 +166,12 @@ func TestRecords(t *testing.T) {
 	}
 	if len(records) != 2 {
 		t.Fatalf("expected 2 records after delete, got %d", len(records))
+	}
+	revoked, err = s.Revoked()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revoked) != 1 || revoked[0].Serial.Int64() != 1 {
+		t.Fatalf("expected the tombstone to stay revoked, got %+v", revoked)
 	}
 }

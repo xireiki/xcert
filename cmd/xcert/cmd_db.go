@@ -107,7 +107,7 @@ Revoked:   %s
 }
 
 func newDBDeleteCommand(dir *string) *cobra.Command {
-	var crlOptions option.CRLOptions
+	var force bool
 	cmd := &cobra.Command{
 		Use:           "delete <serial|name>",
 		Short:         "Delete a record",
@@ -120,23 +120,18 @@ func newDBDeleteCommand(dir *string) *cobra.Command {
 				return err
 			}
 			defer st.Close()
-			record, err := st.Delete(args[0])
+			record, err := st.Delete(args[0], force)
 			if err != nil {
 				return err
 			}
 			log.Info("Deleted %s (%s)\n", record.Serial, record.Name)
 			if record.Type == "cert" {
 				removeRecordFiles(record)
-				if record.Status == "R" {
-					if err := writeCRL(*dir, &crlOptions, st); err != nil {
-						return err
-					}
-				}
 			}
 			return nil
 		},
 	}
-	addCRLFlags(cmd, &crlOptions)
+	cmd.Flags().BoolVar(&force, "force", false, "delete a revoked record, keeping a tombstone on the CRL")
 	return cmd
 }
 

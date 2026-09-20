@@ -86,7 +86,8 @@ CREATE TABLE IF NOT EXISTS certs (
 	cert_path  TEXT,
 	key_path   TEXT,
 	created_at TEXT NOT NULL,
-	revoked_at TEXT
+	revoked_at TEXT,
+	deleted    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_certs_serial ON certs(serial);
 CREATE INDEX IF NOT EXISTS idx_certs_name ON certs(name);
@@ -95,6 +96,9 @@ CREATE INDEX IF NOT EXISTS idx_certs_name ON certs(name);
 		return err
 	}
 	if err := s.ensureColumn("certs", "revoked_at", "TEXT"); err != nil {
+		return err
+	}
+	if err := s.ensureColumn("certs", "deleted", "INTEGER NOT NULL DEFAULT 0"); err != nil {
 		return err
 	}
 	if _, err := s.db.Exec(`UPDATE certs SET revoked_at = created_at WHERE status = 'R' AND (revoked_at IS NULL OR revoked_at = '')`); err != nil {
@@ -200,7 +204,7 @@ func scanRecords(rows *sql.Rows) ([]Record, error) {
 }
 
 func (s *Store) List() ([]Record, error) {
-	rows, err := s.db.Query(`SELECT ` + recordColumns + ` FROM certs ORDER BY id`)
+	rows, err := s.db.Query(`SELECT ` + recordColumns + ` FROM certs WHERE deleted = 0 ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -209,7 +213,7 @@ func (s *Store) List() ([]Record, error) {
 
 func (s *Store) Find(selector string) ([]Record, error) {
 	rows, err := s.db.Query(
-		`SELECT `+recordColumns+` FROM certs WHERE lower(serial) = lower(?) OR name = ? ORDER BY id`,
+		`SELECT `+recordColumns+` FROM certs WHERE deleted = 0 AND (lower(serial) = lower(?) OR name = ?) ORDER BY id`,
 		selector, selector,
 	)
 	if err != nil {
@@ -260,10 +264,20 @@ func (s *Store) Restore(record Record) error {
 	return nil
 }
 
-func (s *Store) Delete(selector string) (Record, error) {
+func (s *Store) Delete(selector string, force bool) (Record, error) {
 	record, err := s.Resolve(selector)
 	if err != nil {
 		return Record{}, err
+	}
+	if record.Status == "R" {
+		if !force {
+			return Record{}, fmt.Errorf("%s is revoked; unrevoke it or use --force", selector)
+		}
+		// Keep a tombstone so the serial stays on the CRL.
+		if _, err := s.db.Exec(`UPDATE certs SET deleted = 1 WHERE id = ?`, record.ID); err != nil {
+			return Record{}, err
+		}
+		return record, nil
 	}
 	if _, err := s.db.Exec(`DELETE FROM certs WHERE id = ?`, record.ID); err != nil {
 		return Record{}, err
