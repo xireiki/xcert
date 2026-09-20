@@ -255,13 +255,14 @@ func (s *Store) Revoked() ([]RevokedEntry, error) {
 		if !ok {
 			continue
 		}
-		entry := RevokedEntry{Serial: n, Time: time.Now()}
-		if revokedAt.Valid {
-			if t, err := time.Parse(time.RFC3339, revokedAt.String); err == nil {
-				entry.Time = t
-			}
+		if !revokedAt.Valid {
+			return nil, fmt.Errorf("revoked certificate %s has no revocation time", serial)
 		}
-		out = append(out, entry)
+		revocationTime, err := time.Parse(time.RFC3339, revokedAt.String)
+		if err != nil {
+			return nil, fmt.Errorf("invalid revocation time for %s: %w", serial, err)
+		}
+		out = append(out, RevokedEntry{Serial: n, Time: revocationTime})
 	}
 	return out, rows.Err()
 }
