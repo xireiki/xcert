@@ -1,13 +1,13 @@
 package pki
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/sha1"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -211,7 +211,8 @@ func EncodeCert(der []byte) []byte {
 func EnsureCSR(path string, subject pkix.Name, dnsNames []string, signer crypto.Signer) error {
 	if Exists(path) {
 		existing, err := LoadCSR(path)
-		if err == nil && existing.Subject.String() == subject.String() && sameStringSet(existing.DNSNames, dnsNames) {
+		if err == nil && existing.Subject.String() == subject.String() && sameStringSet(existing.DNSNames, dnsNames) &&
+			publicKeysEqual(existing.PublicKey, signer.Public()) {
 			return nil
 		}
 	}
@@ -222,18 +223,28 @@ func EnsureCSR(path string, subject pkix.Name, dnsNames []string, signer crypto.
 	return WriteFile(path, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der}), 0644)
 }
 
+func publicKeysEqual(a, b crypto.PublicKey) bool {
+	derA, errA := x509.MarshalPKIXPublicKey(a)
+	derB, errB := x509.MarshalPKIXPublicKey(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	return bytes.Equal(derA, derB)
+}
+
 func sameStringSet(a, b []string) bool {
 	if len(a) != len(b) {
 		return false
 	}
-	set := make(map[string]struct{}, len(a))
+	counts := make(map[string]int, len(a))
 	for _, value := range a {
-		set[value] = struct{}{}
+		counts[value]++
 	}
 	for _, value := range b {
-		if _, ok := set[value]; !ok {
+		if counts[value] == 0 {
 			return false
 		}
+		counts[value]--
 	}
 	return true
 }
@@ -248,26 +259,6 @@ func RandomSerial() (*big.Int, error) {
 		n = big.NewInt(1)
 	}
 	return n, nil
-}
-
-func SubjectKeyID(pub crypto.PublicKey) ([]byte, error) {
-	der, err := x509.MarshalPKIXPublicKey(pub)
-	if err != nil {
-		return nil, err
-	}
-	sum := sha1.Sum(der)
-	return sum[:], nil
-}
-
-func AuthorityKeyID(issuer *x509.Certificate) []byte {
-	if len(issuer.SubjectKeyId) > 0 {
-		return issuer.SubjectKeyId
-	}
-	id, err := SubjectKeyID(issuer.PublicKey)
-	if err != nil {
-		return nil
-	}
-	return id
 }
 
 func ValidUntil(issuer *x509.Certificate, days int, now time.Time) time.Time {
@@ -455,9 +446,7 @@ func Issue(publicKey crypto.PublicKey, parent *x509.Certificate, parentKey crypt
 	} else {
 		tmpl.BasicConstraintsValid = true
 	}
-	if o.AuthorityKeyID {
-		tmpl.AuthorityKeyId = AuthorityKeyID(parent)
-	} else {
+	if !o.AuthorityKeyID {
 		// Prevent the stdlib from deriving an authority key identifier.
 		parentCopy := *parent
 		parentCopy.SubjectKeyId = nil
@@ -482,11 +471,6 @@ func applyCAOptions(tmpl *x509.Certificate, o IssueOptions, publicKey crypto.Pub
 			tmpl.MaxPathLen = o.PathLength
 			tmpl.MaxPathLenZero = o.PathLength == 0
 		}
-		skid, err := SubjectKeyID(publicKey)
-		if err != nil {
-			return err
-		}
-		tmpl.SubjectKeyId = skid
 		return nil
 	}
 	// Keep IsCA false so the stdlib does not force a subject key identifier,
