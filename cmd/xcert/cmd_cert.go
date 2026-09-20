@@ -1,7 +1,9 @@
 package main
 
 import (
+	"crypto"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,6 +24,7 @@ func newCertCommand() *cobra.Command {
 		certFile         string
 		keyFile          string
 		chainFile        string
+		csrFile          string
 		domains          []string
 		sequentialSerial bool
 	)
@@ -32,7 +35,7 @@ func newCertCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			return runCert(&keyOptions, dir, certFile, keyFile, chainFile, domains, sequentialSerial)
+			return runCert(&keyOptions, dir, certFile, keyFile, chainFile, csrFile, domains, sequentialSerial)
 		},
 	}
 	addKeyFlags(cmd, &keyOptions, option.KeyOptions{Cipher: "ecc", Bits: 3072, Subject: defaultCertSubject, Days: 90})
@@ -41,23 +44,13 @@ func newCertCommand() *cobra.Command {
 	flags.StringVarP(&certFile, "cert", "c", "", "signing certificate")
 	flags.StringVarP(&keyFile, "key", "k", "", "signing certificate key")
 	flags.StringVar(&chainFile, "chain", "", "certificate chain")
+	flags.StringVar(&csrFile, "csr", "", "sign an existing certificate request instead of generating a key")
 	flags.StringArrayVarP(&domains, "domain", "d", nil, "domain name")
 	flags.BoolVar(&sequentialSerial, "sequential-serial", false, "use the sequential database serial number instead of a random one")
 	return cmd
 }
 
-func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile string, domains []string, sequentialSerial bool) error {
-	if certFile == "" {
-		certFile = filepath.Join(dir, "InteCA.cer")
-	}
-	if keyFile == "" {
-		keyFile = filepath.Join(dir, "InteCA.key")
-	}
-	if chainFile == "" {
-		chainFile = filepath.Join(dir, "chain.cer")
-	}
-
-	name := pki.ParseSubject(keyOptions.Subject)
+func resolveNames(name pkix.Name, domains []string) (pkix.Name, string, []string, error) {
 	cn := name.CommonName
 	var dnsNames []string
 	if len(domains) >= 1 {
@@ -68,13 +61,59 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile st
 		}
 	}
 	if cn == "" {
-		return fmt.Errorf("common name is empty, set --domain or --subject")
+		return name, "", nil, fmt.Errorf("common name is empty, set --domain or --subject")
 	}
 	if len(dnsNames) == 0 {
 		dnsNames = append(dnsNames, cn)
 	}
 	if name.CommonName != "" && !containsString(dnsNames, name.CommonName) {
 		dnsNames = append(dnsNames, name.CommonName)
+	}
+	return name, cn, dnsNames, nil
+}
+
+func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, csrFile string, domains []string, sequentialSerial bool) error {
+	if certFile == "" {
+		certFile = filepath.Join(dir, "InteCA.cer")
+	}
+	if keyFile == "" {
+		keyFile = filepath.Join(dir, "InteCA.key")
+	}
+	if chainFile == "" {
+		chainFile = filepath.Join(dir, "chain.cer")
+	}
+
+	var (
+		name        pkix.Name
+		cn          string
+		dnsNames    []string
+		cipher      string
+		publicKey   crypto.PublicKey
+		keySigner   crypto.Signer
+		externalCSR = csrFile != ""
+	)
+	if externalCSR {
+		csr, err := pki.LoadCSR(csrFile)
+		if err != nil {
+			return err
+		}
+		csrDomains := domains
+		if len(csrDomains) == 0 {
+			csrDomains = csr.DNSNames
+		}
+		name, cn, dnsNames, err = resolveNames(csr.Subject, csrDomains)
+		if err != nil {
+			return err
+		}
+		publicKey = csr.PublicKey
+		cipher = pki.KeyCipher(publicKey)
+	} else {
+		var err error
+		name, cn, dnsNames, err = resolveNames(pki.ParseSubject(keyOptions.Subject), domains)
+		if err != nil {
+			return err
+		}
+		cipher = keyOptions.Cipher
 	}
 
 	log.Info("Refresh Database\n")
@@ -86,7 +125,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile st
 	}
 	defer st.Close()
 
-	domainDir := filepath.Join(dir, "certs", cn+"_"+keyOptions.Cipher)
+	domainDir := filepath.Join(dir, "certs", cn+"_"+cipher)
 	if err := os.MkdirAll(domainDir, 0755); err != nil {
 		return err
 	}
@@ -96,13 +135,26 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile st
 		return nil
 	}
 
-	keyPath := filepath.Join(domainDir, cn+".key")
-	keySigner, err := pki.EnsureKey(keyPath, keyOptions.Cipher, keyOptions.Bits)
-	if err != nil {
-		return err
-	}
-	if err := pki.EnsureCSR(filepath.Join(domainDir, cn+".csr"), name, keySigner); err != nil {
-		return err
+	keyPath := ""
+	csrPath := filepath.Join(domainDir, cn+".csr")
+	if externalCSR {
+		csrPEM, err := os.ReadFile(csrFile)
+		if err != nil {
+			return err
+		}
+		if err := pki.WriteFile(csrPath, csrPEM, 0644); err != nil {
+			return err
+		}
+	} else {
+		keyPath = filepath.Join(domainDir, cn+".key")
+		keySigner, err = pki.EnsureKey(keyPath, keyOptions.Cipher, keyOptions.Bits)
+		if err != nil {
+			return err
+		}
+		if err := pki.EnsureCSR(csrPath, name, keySigner); err != nil {
+			return err
+		}
+		publicKey = keySigner.Public()
 	}
 
 	cerPath := filepath.Join(domainDir, cn+".cer")
@@ -120,12 +172,12 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile st
 			return err
 		}
 		now := time.Now()
-		cert, der, err := pki.Issue(keySigner.Public(), keySigner, parentCert, parentKey, pki.IssueOptions{
+		cert, der, err := pki.Issue(publicKey, parentCert, parentKey, pki.IssueOptions{
 			Serial:         serial,
 			Subject:        name,
 			NotBefore:      now,
 			NotAfter:       pki.ValidUntil(parentCert, keyOptions.Days, now),
-			KeyUsage:       pki.LeafKeyUsage(keySigner),
+			KeyUsage:       pki.LeafKeyUsage(publicKey),
 			ExtKeyUsage:    []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 			DNSNames:       dnsNames,
 			IsCA:           false,
@@ -155,7 +207,11 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile st
 		}
 	}
 
-	if exists(keyPath) && exists(cerPath) && exists(fullchainPath) {
+	done := exists(cerPath) && exists(fullchainPath)
+	if !externalCSR {
+		done = done && exists(keyPath)
+	}
+	if done {
 		log.Info("Done.\n")
 	}
 	return nil

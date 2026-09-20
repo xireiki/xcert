@@ -3,6 +3,7 @@ package pki
 import (
 	"crypto"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -147,6 +148,25 @@ func LoadCert(path string) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
+func LoadCSR(path string) (*x509.CertificateRequest, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM certificate request: %s", path)
+	}
+	csr, err := x509.ParseCertificateRequest(block.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	if err := csr.CheckSignature(); err != nil {
+		return nil, fmt.Errorf("invalid certificate request signature: %w", err)
+	}
+	return csr, nil
+}
+
 func EncodeCert(der []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
@@ -226,11 +246,24 @@ func SignatureAlgorithm(digest string, key crypto.Signer) (x509.SignatureAlgorit
 	return x509.UnknownSignatureAlgorithm, fmt.Errorf("unsupported digest %q for this key type", digest)
 }
 
-func LeafKeyUsage(signer crypto.Signer) x509.KeyUsage {
-	if _, ok := signer.(*ecdsa.PrivateKey); ok {
-		return x509.KeyUsageDigitalSignature
+func KeyCipher(publicKey crypto.PublicKey) string {
+	switch publicKey.(type) {
+	case *rsa.PublicKey:
+		return "rsa"
+	case *ecdsa.PublicKey:
+		return "ecc"
+	case ed25519.PublicKey:
+		return "ed25519"
+	default:
+		return "unknown"
 	}
-	return x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
+}
+
+func LeafKeyUsage(publicKey crypto.PublicKey) x509.KeyUsage {
+	if _, ok := publicKey.(*rsa.PublicKey); ok {
+		return x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
+	}
+	return x509.KeyUsageDigitalSignature
 }
 
 var keyUsageNames = map[string]x509.KeyUsage{
@@ -322,7 +355,7 @@ func IssueSelfSigned(key crypto.Signer, o IssueOptions) (*x509.Certificate, []by
 	return cert, der, nil
 }
 
-func Issue(publicKey crypto.PublicKey, key crypto.Signer, parent *x509.Certificate, parentKey crypto.Signer, o IssueOptions) (*x509.Certificate, []byte, error) {
+func Issue(publicKey crypto.PublicKey, parent *x509.Certificate, parentKey crypto.Signer, o IssueOptions) (*x509.Certificate, []byte, error) {
 	sig, err := SignatureAlgorithm(o.Digest, parentKey)
 	if err != nil {
 		return nil, nil, err

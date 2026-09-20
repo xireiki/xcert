@@ -105,7 +105,7 @@ func runInte(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir, ce
 		return err
 	}
 	now := time.Now()
-	cert, der, err := pki.Issue(keySigner.Public(), keySigner, parentCert, parentKey, pki.IssueOptions{
+	cert, der, err := pki.Issue(keySigner.Public(), parentCert, parentKey, pki.IssueOptions{
 		Serial:         serial,
 		Subject:        subject,
 		NotBefore:      now,

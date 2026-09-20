@@ -250,6 +250,7 @@ xcert <子命令> [参数]
 | `-k`, `--key` | `<dir>/InteCA.key` | 签发证书所用的 CA 私钥 |
 | `--chain` | `<dir>/chain.cer` | 用于拼接 `fullchain.cer` 的证书链 |
 | `-d`, `--domain` | 无 | 域名，可重复指定 |
+| `--csr` | 无 | 签署外部证书请求，使用请求中的公钥与主体，不再生成私钥与请求 |
 | `--sequential-serial` | `false` | 使用数据库递增计数器作为序列号；默认使用随机序列号 |
 | `-h`, `--help` | | 显示帮助 |
 
@@ -276,14 +277,25 @@ xcert <子命令> [参数]
 
 密钥用法依据密钥类型自动确定：ECDSA 私钥使用 `digitalSignature`；RSA 私钥使用 `digitalSignature,keyEncipherment`。扩展密钥用法为 `serverAuth,clientAuth`，`basicConstraints` 为 `CA:FALSE`。签名摘要算法固定为 SHA-256。
 
+### 签署外部证书请求
+
+通过 `--csr` 可以签署由他人提供的证书请求，流程如下：
+
+- 解析请求文件并校验其签名，签名无效或格式错误时报错。
+- 使用请求中的公钥与主体信息，不再生成本地私钥；`--cipher`、`--rsa-bits`、`--subject` 在该模式下不生效。
+- `subjectAltName` 默认取请求中的域名；若另外通过 `-d` 指定域名，则以 `-d` 为准。
+- 通用名称取首个域名；若请求主体自带 `CN`，会保留并确保其出现在 `subjectAltName` 中。
+- 输出目录与本地生成时一致，为 `<dir>/certs/<CN>_<密钥类型>`，其中密钥类型根据请求的公钥自动判断（`ecc`、`rsa`、`ed25519`）。
+- 该模式下只写入 `<CN>.cer`、外部请求副本 `<CN>.csr` 与 `fullchain.cer`，不写入 `<CN>.key`；数据库记录中的 `key_path` 为空。
+
 ### 输出文件
 
 在 `<dir>/certs/<CN>_<cipher>/` 下：
 
 | 文件 | 说明 |
 | --- | --- |
-| `<CN>.key` | 私钥，权限 0600 |
-| `<CN>.csr` | 证书请求 |
+| `<CN>.key` | 私钥，权限 0600；使用 `--csr` 时不生成 |
+| `<CN>.csr` | 证书请求；使用 `--csr` 时为外部请求的副本 |
 | `<CN>.cer` | 域名证书 |
 | `fullchain.cer` | 域名证书与证书链拼接的完整链 |
 

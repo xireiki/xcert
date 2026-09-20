@@ -1,7 +1,11 @@
 package main
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"os"
 	"path/filepath"
@@ -71,6 +75,46 @@ func TestChain(t *testing.T) {
 	}
 	if len(records) != 3 {
 		t.Fatalf("expected 3 certs recorded, got %d", len(records))
+	}
+}
+
+func TestSignCSR(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca")
+	exec(t, "root", "-D", ca)
+	exec(t, "inte", "-D", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"))
+
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{
+		Subject:  pkix.Name{CommonName: "csr.test"},
+		DNSNames: []string{"csr.test", "alt.csr.test"},
+	}, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	csrPath := filepath.Join(t.TempDir(), "req.csr")
+	if err := os.WriteFile(csrPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der}), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	exec(t, "cert", "-D", ca, "--csr", csrPath)
+
+	dir := filepath.Join(ca, "certs", "csr.test_ecc")
+	block, _ := pem.Decode(mustRead(t, filepath.Join(dir, "csr.test.cer")))
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cert.PublicKey.(*ecdsa.PublicKey).Equal(key.Public()) {
+		t.Fatal("issued certificate public key does not match the request")
+	}
+	if len(cert.DNSNames) != 2 {
+		t.Fatalf("expected 2 SANs from the request, got %v", cert.DNSNames)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "csr.test.key")); !os.IsNotExist(err) {
+		t.Fatal("expected no private key file when signing an external request")
 	}
 }
 
