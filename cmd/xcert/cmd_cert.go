@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"xcert/log"
@@ -52,6 +53,16 @@ func newCertCommand() *cobra.Command {
 	return cmd
 }
 
+func validateCommonName(cn string) error {
+	if cn == "" {
+		return fmt.Errorf("common name is empty")
+	}
+	if cn == "." || cn == ".." || cn != filepath.Base(cn) || strings.ContainsAny(cn, `/\`) || strings.ContainsRune(cn, 0) {
+		return fmt.Errorf("unsafe common name %q", cn)
+	}
+	return nil
+}
+
 func resolveNames(name pkix.Name, domains []string) (pkix.Name, string, []string, error) {
 	cn := name.CommonName
 	var dnsNames []string
@@ -64,6 +75,9 @@ func resolveNames(name pkix.Name, domains []string) (pkix.Name, string, []string
 	}
 	if cn == "" {
 		return name, "", nil, fmt.Errorf("common name is empty, set --domain or --subject")
+	}
+	if err := validateCommonName(cn); err != nil {
+		return name, "", nil, err
 	}
 	if len(dnsNames) == 0 {
 		dnsNames = append(dnsNames, cn)
@@ -116,6 +130,9 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 			return err
 		}
 		cipher = keyOptions.Cipher
+		if err := pki.ValidateCipher(cipher); err != nil {
+			return err
+		}
 	}
 
 	log.Info("Start generating certificate\n")

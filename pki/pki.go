@@ -70,7 +70,19 @@ func ParseSubject(s string) pkix.Name {
 	return n
 }
 
+func ValidateCipher(cipher string) error {
+	switch cipher {
+	case "ecc", "rsa":
+		return nil
+	default:
+		return fmt.Errorf("unsupported cipher %q, supported: ecc, rsa", cipher)
+	}
+}
+
 func GenerateKey(cipher string, bits int) (crypto.Signer, []byte, error) {
+	if err := ValidateCipher(cipher); err != nil {
+		return nil, nil, err
+	}
 	switch cipher {
 	case "ecc":
 		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
