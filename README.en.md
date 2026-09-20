@@ -1,6 +1,9 @@
-# xcert
-
-[简体中文](README.md) | English
+<p align="center">
+  <img width="100px" src="icon.svg" alt="xcert" />
+  <h2 align="center">xcert</h2>
+  <p align="center">An X.509 certificate issuance tool written in Go</p>
+  <p align="center"><a href="README.md">简体中文</a> | <a href="README.en.md">English</a></p>
+</p>
 
 An X.509 certificate issuance tool written in Go. It generates self-signed root certificates, intermediate certificates and domain certificates, and provides SQLite-based certificate database management (list, query, delete, revoke, unrevoke, generate CRL).
 

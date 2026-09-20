@@ -1,6 +1,9 @@
-# xcert
-
-[English](README.en.md) | 简体中文
+<p align="center">
+  <img width="100px" src="icon.svg" alt="xcert" />
+  <h2 align="center">xcert</h2>
+  <p align="center">用 Go 实现的 X.509 证书颁发工具</p>
+  <p align="center"><a href="README.en.md">English</a> | <a href="README.md">简体中文</a></p>
+</p>
 
 用 Go 实现的 X.509 证书颁发工具，用于生成自签根证书、中间证书和域名证书，并提供基于 SQLite 的证书数据库管理功能（列出、查询、删除、吊销、解除吊销、生成 CRL）。
 
