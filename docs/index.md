@@ -629,6 +629,7 @@ xcert db list -D ./oldca
 
 ```
 .
+├── .github/          GitHub Actions
 ├── cmd/xcert/        命令行入口，每个子命令一个 cmd_*.go 文件
 ├── docs/             MkDocs 文档源文件
 ├── log/              日志等级与输出

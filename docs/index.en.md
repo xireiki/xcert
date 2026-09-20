@@ -629,6 +629,7 @@ Certificate generation is designed around the following specifications:
 
 ```
 .
+├── .github/          GitHub Actions
 ├── cmd/xcert/        command-line entry point, one cmd_*.go file per subcommand
 ├── docs/             MkDocs documentation sources
 ├── log/              log levels and output
