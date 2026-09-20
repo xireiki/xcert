@@ -36,6 +36,28 @@ func TestChain(t *testing.T) {
 		t.Fatalf("chain verification failed: %v", err)
 	}
 
+	if len(leaf.DNSNames) != 2 {
+		t.Fatalf("expected 2 SANs, got %v", leaf.DNSNames)
+	}
+	if leaf.KeyUsage != x509.KeyUsageDigitalSignature {
+		t.Fatalf("expected ECDSA leaf key usage digitalSignature, got %v", leaf.KeyUsage)
+	}
+	if leaf.SignatureAlgorithm != x509.ECDSAWithSHA256 {
+		t.Fatalf("expected ECDSAWithSHA256 leaf signature, got %v", leaf.SignatureAlgorithm)
+	}
+	if leaf.SerialNumber.BitLen() <= 64 {
+		t.Fatalf("expected random serial with more than 64 bits, got %s", leaf.SerialNumber)
+	}
+
+	inteBlock, _ := pem.Decode(mustRead(t, filepath.Join(ca, "InteCA.cer")))
+	inte, err := x509.ParseCertificate(inteBlock.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if leaf.NotAfter.After(inte.NotAfter) {
+		t.Fatalf("leaf NotAfter %s exceeds issuer NotAfter %s", leaf.NotAfter, inte.NotAfter)
+	}
+
 	st, err := openStore(filepath.Join(ca, dbFileName))
 	if err != nil {
 		t.Fatal(err)
@@ -47,6 +69,25 @@ func TestChain(t *testing.T) {
 	}
 	if count != 3 {
 		t.Fatalf("expected 3 certs recorded, got %d", count)
+	}
+}
+
+func TestSequentialSerial(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca")
+	exec(t, "root", "-D", ca)
+	exec(t, "inte", "-D", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"))
+	exec(t, "cert", "-D", ca, "-d", "one.test", "--sequential-serial")
+	exec(t, "cert", "-D", ca, "-d", "two.test", "--sequential-serial")
+
+	for name, want := range map[string]int64{"one.test": 1, "two.test": 2} {
+		block, _ := pem.Decode(mustRead(t, filepath.Join(ca, "certs", name+"_ecc", name+".cer")))
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if cert.SerialNumber.Int64() != want {
+			t.Fatalf("%s: expected serial %d, got %s", name, want, cert.SerialNumber)
+		}
 	}
 }
 

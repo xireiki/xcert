@@ -12,7 +12,7 @@
 - 提供 `db` 子命令管理证书数据库
 - 支持吊销证书并按需生成 X.509 CRL
 - 可自定义密钥用法、扩展密钥用法、CA 路径长度、签名摘要算法等证书能力参数
-- 支持随机序列号或基于数据库计数器递增的序列号
+- 默认使用随机序列号，可用 `--sequential-serial` 切换为基于数据库计数器递增的序列号
 
 ## 构建与安装
 
@@ -125,11 +125,11 @@ xcert <子命令> [参数]
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa`。其他取值会报错 |
-| `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数，仅在 `--cipher rsa` 时生效，最小 512 |
+| `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数，仅在 `--cipher rsa` 时生效，最小 2048 |
 | `-s`, `--subject` | `/C=CN/O=Test SSL/CN=Test SSL CA` | 证书主体信息 |
 | `--days` | `3650` | 证书有效期，单位为天 |
 | `-D`, `--dir` | `.` | 文件保存目录 |
-| `--key-usage` | 空 | 密钥用法扩展，逗号分隔，多个值取并集 |
+| `--key-usage` | `keyCertSign,cRLSign` | 密钥用法扩展，逗号分隔，多个值取并集 |
 | `--ext-key-usage` | 空 | 扩展密钥用法，逗号分隔 |
 | `--path-length` | `-1` | CA 路径长度限制，`-1` 表示不设置该限制 |
 | `--digest` | `sha512` | 签名摘要算法，可选 `sha256`、`sha384`、`sha512` |
@@ -146,7 +146,7 @@ xcert <子命令> [参数]
 - 将根证书记录写入 `<dir>/xcert.db`，类型为 `root`，名称为 `RootCA`。
 - 根证书使用随机序列号（128 位）。
 
-根证书默认不包含 `keyUsage` 与 `extendedKeyUsage` 扩展，`basicConstraints` 为 `CA:TRUE`。默认包含 SKI。
+根证书默认包含 `keyUsage`（`keyCertSign,cRLSign`）与 `basicConstraints`（`CA:TRUE`），并默认包含 SKI。签名摘要算法由 `--digest` 决定。
 
 ### 输出文件
 
@@ -171,7 +171,7 @@ xcert <子命令> [参数]
 | `-D`, `--dir` | `.` | 文件保存目录 |
 | `-c`, `--cert` | 无，必填 | 签发中间证书的上级 CA 证书路径 |
 | `-k`, `--key` | 无，必填 | 签发中间证书的上级 CA 私钥路径 |
-| `-R`, `--random-serial` | `false` | 使用随机序列号，不占用数据库递增计数器 |
+| `--sequential-serial` | `false` | 使用数据库递增计数器作为序列号；默认使用随机序列号 |
 | `--key-usage` | `keyCertSign,cRLSign` | 密钥用法扩展 |
 | `--ext-key-usage` | `serverAuth,clientAuth` | 扩展密钥用法 |
 | `--path-length` | `0` | CA 路径长度限制，`-1` 表示不设置 |
@@ -190,8 +190,10 @@ xcert <子命令> [参数]
 - 使用上级 CA 证书与私钥签发 `InteCA.cer`。
 - 生成证书链 `chain.cer`，内容为 `InteCA.cer` 与上级 CA 证书的拼接。
 - 将中间证书记录写入数据库，类型为 `inte`，名称为 `InteCA`。
+- 证书 `NotAfter` 取请求天数与上级 CA 的 `NotAfter` 中的较小值，保证不超过签发者有效期。
+- 若上级 CA 不带 SKI，则使用其公钥的 SHA-1 摘要作为 AKI。
 
-默认序列号从数据库计数器读取并递增；使用 `-R` 时改为随机序列号且不改变计数器。
+默认使用随机序列号；使用 `--sequential-serial` 时改为从数据库计数器读取并递增。
 
 ### 输出文件
 
@@ -222,16 +224,17 @@ xcert <子命令> [参数]
 | `-k`, `--key` | `<dir>/InteCA.key` | 签发证书所用的 CA 私钥 |
 | `--chain` | `<dir>/chain.cer` | 用于拼接 `fullchain.cer` 的证书链 |
 | `-d`, `--domain` | 无 | 域名，可重复指定 |
-| `-R`, `--random-serial` | `false` | 使用随机序列号，不占用数据库递增计数器 |
+| `--sequential-serial` | `false` | 使用数据库递增计数器作为序列号；默认使用随机序列号 |
 | `-h`, `--help` | | 显示帮助 |
 
 ### 名称与 SAN 规则
 
-- 若通过 `-d` 指定了至少一个域名，证书目录名与文件名中的通用名称取第一个域名。
-- 若未指定 `-d`，则取 `--subject` 中的 `CN` 字段。
-- 若两者都为空，报错。
-- 只有当 `-d` 指定的域名数量大于 1 时，才会写入 `subjectAltName` 扩展，内容为全部域名；只指定一个域名时不写入 SAN。
-- 证书主体（Subject）始终为 `--subject` 的解析结果，域名不会自动写入主体的 `CN` 字段。
+- 通用名称 `CN` 与 `subjectAltName` 始终写入，满足 RFC 6125 主机名校验要求。
+- 若通过 `-d` 指定了至少一个域名，`CN` 取第一个域名，`subjectAltName` 包含全部域名。
+- 若 `-d` 指定了域名且 `--subject` 未包含 `CN`，会自动将第一个域名写入主体 `CN`。
+- 若未指定 `-d`，则取 `--subject` 中的 `CN` 作为域名并写入 `subjectAltName`。
+- 若 `--subject` 的 `CN` 存在且不在域名列表中，会一并追加到 `subjectAltName`。
+- 若 `-d` 与 `--subject` 的 `CN` 都为空，报错。
 
 ### 行为
 
@@ -242,8 +245,10 @@ xcert <子命令> [参数]
 - 使用 CA 证书与私钥签发 `<CN>.cer`。
 - 生成 `<CN> 的完整证书链 fullchain.cer`，内容为 `<CN>.cer` 与 `--chain` 指定文件内容的拼接。
 - 将域名证书记录写入数据库，类型为 `cert`，名称为 `CN`。
+- 证书 `NotAfter` 取请求天数与签发 CA 的 `NotAfter` 中的较小值，保证不超过签发者有效期。
+- 若签发 CA 不带 SKI，则使用其公钥的 SHA-1 摘要作为 AKI。
 
-默认密钥用法为 `digitalSignature,keyEncipherment`，扩展密钥用法为 `serverAuth,clientAuth`，`basicConstraints` 为 `CA:FALSE`。签名摘要算法固定为 SHA-512。
+密钥用法依据密钥类型自动确定：ECDSA 私钥使用 `digitalSignature`；RSA 私钥使用 `digitalSignature,keyEncipherment`。扩展密钥用法为 `serverAuth,clientAuth`，`basicConstraints` 为 `CA:FALSE`。签名摘要算法固定为 SHA-256，符合 CA/Browser Forum Baseline Requirements 对服务器证书的要求。
 
 ### 输出文件
 
@@ -440,7 +445,7 @@ ca
 | `created_at` | TEXT | 记录创建时间，RFC 3339 |
 | `revoked_at` | TEXT | 吊销时间，RFC 3339，未吊销为空 |
 
-序列号计数器 `serial` 初始为 `01`，每签发一张中间证书或域名证书后递增；`root` 始终使用随机序列号，不占用该计数器。使用 `-R` / `--random-serial` 时同样使用随机序列号且不递增计数器。CRL 编号使用独立的 `crl` 计数器。
+序列号默认使用 128 位随机数，不占用数据库计数器；使用 `--sequential-serial` 时读取 `serial` 计数器（初始为 `01`）并递增。`root` 始终使用随机序列号。CRL 编号使用独立的 `crl` 计数器。
 
 ## 与旧版 shell 脚本的差异
 
@@ -449,7 +454,17 @@ ca
 - 新增 `db` 子命令与 CRL 生成能力。
 - 新增证书能力参数。
 - `cert` 命令的 CA 证书、私钥与证书链默认路径会随 `-D` / `--dir` 一起变化。
-- 参数统一为 GNU kebab-case 风格：CA 目录统一为 `-D` / `--dir`；`-o` / `--output`、`--subj`、`--rsa-bit-number`、`--pathlen`、`--md`、`--rand-serial`、CRL 的 `--days` 分别更名为 `-D` / `--dir`、`--subject`、`--rsa-bits`、`--path-length`、`--digest`、`--random-serial`、`--crl-days`。
+- 参数统一为 GNU kebab-case 风格：CA 目录统一为 `-D` / `--dir`；`-o` / `--output`、`--subj`、`--rsa-bit-number`、`--pathlen`、`--md`、CRL 的 `--days` 分别更名为 `-D` / `--dir`、`--subject`、`--rsa-bits`、`--path-length`、`--digest`、`--crl-days`。
+- 序列号策略调整：默认使用随机序列号，`-R` / `--random-serial` 替换为 `--sequential-serial`（反向语义，用于启用递增计数器）。
+
+## 协议符合性
+
+证书生成逻辑依据以下规范设计：
+
+- RFC 5280：证书有效期不超出签发者；`keyUsage` 与 `basicConstraints` 扩展；签发者密钥标识符（AKI）计算。
+- RFC 6125：主机名始终通过 `subjectAltName` 表达，`CN` 与 `subjectAltName` 保持一致。
+- RFC 5480：ECDSA 证书的 `keyUsage` 不含 `keyEncipherment`。
+- CA/Browser Forum Baseline Requirements：服务器证书签名摘要使用 SHA-256；CA 证书包含 `keyCertSign`；RSA 密钥长度不小于 2048；序列号包含至少 64 位密码学安全随机数。
 
 ## 许可证
 

@@ -111,8 +111,8 @@ func (s *store) close() error {
 	return s.db.Close()
 }
 
-func (s *store) nextSerial(useRandom bool) (*big.Int, error) {
-	if useRandom {
+func (s *store) nextSerial(sequential bool) (*big.Int, error) {
+	if !sequential {
 		return randomSerial()
 	}
 	current, err := s.metaCounter("serial")

@@ -65,6 +65,15 @@ func exists(path string) bool {
 	return err == nil
 }
 
+func containsString(list []string, value string) bool {
+	for _, item := range list {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}
+
 func writeFile(path string, data []byte, perm os.FileMode) error {
 	if err := os.WriteFile(path, data, perm); err != nil {
 		return fmt.Errorf("failed to write %s: %w", path, err)
@@ -116,8 +125,8 @@ func generateKey(cipher string, bits int) (crypto.Signer, []byte, error) {
 		}
 		return key, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), nil
 	case "rsa":
-		if bits < 512 {
-			return nil, nil, fmt.Errorf("RSA key length too small: %d", bits)
+		if bits < 2048 {
+			return nil, nil, fmt.Errorf("RSA key length too small: %d, minimum is 2048", bits)
 		}
 		key, err := rsa.GenerateKey(rand.Reader, bits)
 		if err != nil {
@@ -382,7 +391,7 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 	addKeyFlags(cmd, &o.keyOptions, keyOptions{cipher: "ecc", bits: 3072, subject: defaultRootSubject, days: 3650})
-	addCAFlags(cmd, &o.caOptions, caOptions{pathLength: -1, digest: "sha512", subjectKeyID: true, authorityKeyID: true})
+	addCAFlags(cmd, &o.caOptions, caOptions{keyUsage: []string{"keyCertSign", "cRLSign"}, pathLength: -1, digest: "sha512", subjectKeyID: true, authorityKeyID: true})
 	cmd.Flags().StringVarP(&o.dir, "dir", "D", ".", "certificate directory")
 	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpWithRootCommand() })
 	return cmd
@@ -471,10 +480,10 @@ func runRoot(o *rootOptions) error {
 type inteOptions struct {
 	keyOptions
 	caOptions
-	dir        string
-	cert       string
-	key        string
-	randSerial bool
+	dir              string
+	cert             string
+	key              string
+	sequentialSerial bool
 }
 
 func newInteCmd() *cobra.Command {
@@ -498,7 +507,7 @@ func newInteCmd() *cobra.Command {
 	f.StringVarP(&o.dir, "dir", "D", ".", "certificate directory")
 	f.StringVarP(&o.cert, "cert", "c", "", "intermediate certificate")
 	f.StringVarP(&o.key, "key", "k", "", "intermediate certificate key")
-	f.BoolVarP(&o.randSerial, "random-serial", "R", false, "use a random serial number")
+	f.BoolVar(&o.sequentialSerial, "sequential-serial", false, "use the sequential database serial number instead of a random one")
 	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpWithInteCommand() })
 	return cmd
 }
@@ -566,7 +575,7 @@ func runInte(o *inteOptions) error {
 		if err != nil {
 			return err
 		}
-		serial, err := st.nextSerial(o.randSerial)
+		serial, err := st.nextSerial(o.sequentialSerial)
 		if err != nil {
 			return err
 		}
@@ -583,11 +592,15 @@ func runInte(o *inteOptions) error {
 			return err
 		}
 		now := time.Now()
+		notAfter := now.AddDate(0, 0, o.days)
+		if parentCert.NotAfter.Before(notAfter) {
+			notAfter = parentCert.NotAfter
+		}
 		tmpl := &x509.Certificate{
 			SerialNumber:       serial,
 			Subject:            parseSubject(o.subject),
 			NotBefore:          now,
-			NotAfter:           now.AddDate(0, 0, o.days),
+			NotAfter:           notAfter,
 			KeyUsage:           usage,
 			ExtKeyUsage:        extUsage,
 			SignatureAlgorithm: sig,
@@ -597,6 +610,11 @@ func runInte(o *inteOptions) error {
 		}
 		if o.authorityKeyID {
 			tmpl.AuthorityKeyId = parentCert.SubjectKeyId
+			if len(tmpl.AuthorityKeyId) == 0 {
+				if id, err := subjectKeyID(parentCert.PublicKey); err == nil {
+					tmpl.AuthorityKeyId = id
+				}
+			}
 		} else {
 			// Prevent the stdlib from deriving an authority key identifier.
 			parentCert.SubjectKeyId = nil
@@ -629,12 +647,12 @@ func runInte(o *inteOptions) error {
 
 type certOptions struct {
 	keyOptions
-	dir        string
-	cert       string
-	key        string
-	chain      string
-	domains    []string
-	randSerial bool
+	dir              string
+	cert             string
+	key              string
+	chain            string
+	domains          []string
+	sequentialSerial bool
 }
 
 func newCertCmd() *cobra.Command {
@@ -656,7 +674,7 @@ func newCertCmd() *cobra.Command {
 	f.StringVarP(&o.key, "key", "k", "", "signing certificate key")
 	f.StringVar(&o.chain, "chain", "", "certificate chain")
 	f.StringArrayVarP(&o.domains, "domain", "d", nil, "domain name")
-	f.BoolVarP(&o.randSerial, "random-serial", "R", false, "use a random serial number")
+	f.BoolVar(&o.sequentialSerial, "sequential-serial", false, "use the sequential database serial number instead of a random one")
 	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpWithCertCommand() })
 	return cmd
 }
@@ -673,11 +691,22 @@ func runCert(o *certOptions) error {
 	}
 	name := parseSubject(o.subject)
 	cn := name.CommonName
+	var dnsNames []string
 	if len(o.domains) >= 1 {
 		cn = o.domains[0]
+		dnsNames = append(dnsNames, o.domains...)
+		if name.CommonName == "" {
+			name.CommonName = cn
+		}
 	}
 	if cn == "" {
 		return fmt.Errorf("common name is empty, set --domain or --subject")
+	}
+	if len(dnsNames) == 0 {
+		dnsNames = append(dnsNames, cn)
+	}
+	if name.CommonName != "" && !containsString(dnsNames, name.CommonName) {
+		dnsNames = append(dnsNames, name.CommonName)
 	}
 
 	info("Refresh Database\n")
@@ -735,24 +764,39 @@ func runCert(o *certOptions) error {
 		if err != nil {
 			return err
 		}
-		serial, err := st.nextSerial(o.randSerial)
+		serial, err := st.nextSerial(o.sequentialSerial)
 		if err != nil {
 			return err
 		}
 		now := time.Now()
+		notAfter := now.AddDate(0, 0, o.days)
+		if parentCert.NotAfter.Before(notAfter) {
+			notAfter = parentCert.NotAfter
+		}
+		keyUsage := x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
+		if _, ok := keySigner.(*ecdsa.PrivateKey); ok {
+			keyUsage = x509.KeyUsageDigitalSignature
+		}
+		sig, err := signatureAlgorithm("sha256", parentKey)
+		if err != nil {
+			return err
+		}
 		tmpl := &x509.Certificate{
 			SerialNumber:          serial,
 			Subject:               name,
 			NotBefore:             now,
-			NotAfter:              now.AddDate(0, 0, o.days),
-			KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+			NotAfter:              notAfter,
+			DNSNames:              dnsNames,
+			KeyUsage:              keyUsage,
 			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
 			BasicConstraintsValid: true,
 			AuthorityKeyId:        parentCert.SubjectKeyId,
-			SignatureAlgorithm:    sigAlg(parentKey),
+			SignatureAlgorithm:    sig,
 		}
-		if len(o.domains) > 1 {
-			tmpl.DNSNames = append(tmpl.DNSNames, o.domains...)
+		if len(tmpl.AuthorityKeyId) == 0 {
+			if id, err := subjectKeyID(parentCert.PublicKey); err == nil {
+				tmpl.AuthorityKeyId = id
+			}
 		}
 		der, err := x509.CreateCertificate(rand.Reader, tmpl, parentCert, keySigner.Public(), parentKey)
 		if err != nil {
@@ -828,7 +872,7 @@ Options:
 	-s, --subject       Set subject information(Default: "/C=CN/O=Test SSL/CN=Test SSL CA")
 	--days              Set the expiration time(Default: 3650)
 	-D, --dir           Set the file save directory(Default: .)
-	--key-usage         Set key usage extension, comma separated(Default: empty)
+	--key-usage         Set key usage extension, comma separated(Default: "keyCertSign,cRLSign")
 	--ext-key-usage     Set extended key usage extension, comma separated(Default: empty)
 	--path-length       Set CA path length, -1 for unset(Default: -1)
 	--digest            Set signature digest algorithm(Default: sha512)
@@ -849,7 +893,7 @@ Options:
 	-D, --dir           Set the file save directory(Default: .)
 	-c, --cert          Set intermediate certificate
 	-k, --key           Set intermediate certificate key
-	-R, --random-serial Use a random serial number
+	--sequential-serial Use the sequential database serial number instead of a random one
 	--key-usage         Set key usage extension, comma separated(Default: "keyCertSign,cRLSign")
 	--ext-key-usage     Set extended key usage extension, comma separated(Default: "serverAuth,clientAuth")
 	--path-length       Set CA path length, -1 for unset(Default: 0)
@@ -873,7 +917,7 @@ Options:
 	-k, --key           Set certificate key(Default: <dir>/InteCA.key)
 	--chain             Set up a certificate chain(Default: <dir>/chain.cer)
 	-d, --domain        Set a domain name, repeatable
-	-R, --random-serial Use a random serial number
+	--sequential-serial Use the sequential database serial number instead of a random one
 `, progName)
 }
 
