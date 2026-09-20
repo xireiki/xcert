@@ -1,13 +1,17 @@
 package pki
 
 import (
+	"bytes"
 	"crypto/ecdsa"
 	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/pem"
 	"math/big"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 )
@@ -163,5 +167,30 @@ func TestIssueSelfSignedCAPath(t *testing.T) {
 	}
 	if len(cert.SubjectKeyId) != 0 {
 		t.Fatalf("expected no subject key identifier, got %x", cert.SubjectKeyId)
+	}
+}
+
+func TestLoadLegacyECKey(t *testing.T) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var pemData bytes.Buffer
+	pemData.Write(pem.EncodeToMemory(&pem.Block{Type: "EC PARAMETERS", Bytes: []byte("params")}))
+	pemData.Write(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}))
+	path := filepath.Join(t.TempDir(), "legacy.key")
+	if err := os.WriteFile(path, pemData.Bytes(), 0600); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadKey(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !publicKeysEqual(loaded.Public(), key.Public()) {
+		t.Fatal("loaded legacy key does not match")
 	}
 }

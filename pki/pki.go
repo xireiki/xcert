@@ -150,17 +150,27 @@ func LoadKey(path string) (crypto.Signer, error) {
 	if err != nil {
 		return nil, err
 	}
-	block, _ := pem.Decode(data)
-	if block == nil {
-		return nil, fmt.Errorf("failed to decode PEM key: %s", path)
+	for len(data) > 0 {
+		var block *pem.Block
+		block, data = pem.Decode(data)
+		if block == nil {
+			break
+		}
+		if key, err := parseKeyDER(block.Bytes); err == nil {
+			return key, nil
+		}
 	}
-	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+	return nil, fmt.Errorf("unsupported private key: %s", path)
+}
+
+func parseKeyDER(der []byte) (crypto.Signer, error) {
+	if key, err := x509.ParseECPrivateKey(der); err == nil {
 		return key, nil
 	}
-	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
 		return key, nil
 	}
-	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
 		switch k := key.(type) {
 		case *rsa.PrivateKey:
 			return k, nil
@@ -170,7 +180,7 @@ func LoadKey(path string) (crypto.Signer, error) {
 			return k, nil
 		}
 	}
-	return nil, fmt.Errorf("unsupported private key: %s", path)
+	return nil, fmt.Errorf("unsupported key encoding")
 }
 
 func LoadCert(path string) (*x509.Certificate, error) {
