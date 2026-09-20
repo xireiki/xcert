@@ -79,6 +79,9 @@ CREATE INDEX IF NOT EXISTS idx_certs_name ON certs(name);
 	if err := s.ensureColumn("certs", "revoked_at", "TEXT"); err != nil {
 		return err
 	}
+	if _, err := s.db.Exec(`UPDATE certs SET revoked_at = created_at WHERE status = 'R' AND (revoked_at IS NULL OR revoked_at = '')`); err != nil {
+		return err
+	}
 	_, err = s.db.Exec(`INSERT OR IGNORE INTO meta(key, value) VALUES('serial', '01')`)
 	return err
 }
@@ -251,8 +254,19 @@ func (s *Store) Delete(selector string) (Record, error) {
 	return record, nil
 }
 
+func parseTimestamp(value sql.NullString) (time.Time, bool) {
+	if !value.Valid || value.String == "" {
+		return time.Time{}, false
+	}
+	t, err := time.Parse(time.RFC3339, value.String)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
 func (s *Store) Revoked() ([]RevokedEntry, error) {
-	rows, err := s.db.Query(`SELECT serial, revoked_at FROM certs WHERE status = 'R' AND type = 'cert' ORDER BY id`)
+	rows, err := s.db.Query(`SELECT serial, revoked_at, created_at FROM certs WHERE status = 'R' AND type = 'cert' ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
@@ -260,20 +274,20 @@ func (s *Store) Revoked() ([]RevokedEntry, error) {
 	var out []RevokedEntry
 	for rows.Next() {
 		var serial string
-		var revokedAt sql.NullString
-		if err := rows.Scan(&serial, &revokedAt); err != nil {
+		var revokedAt, createdAt sql.NullString
+		if err := rows.Scan(&serial, &revokedAt, &createdAt); err != nil {
 			return nil, err
 		}
 		n, ok := new(big.Int).SetString(serial, 16)
 		if !ok {
 			continue
 		}
-		if !revokedAt.Valid {
-			return nil, fmt.Errorf("revoked certificate %s has no revocation time", serial)
+		revocationTime, ok := parseTimestamp(revokedAt)
+		if !ok {
+			revocationTime, ok = parseTimestamp(createdAt)
 		}
-		revocationTime, err := time.Parse(time.RFC3339, revokedAt.String)
-		if err != nil {
-			return nil, fmt.Errorf("invalid revocation time for %s: %w", serial, err)
+		if !ok {
+			return nil, fmt.Errorf("revoked certificate %s has no valid revocation time", serial)
 		}
 		out = append(out, RevokedEntry{Serial: n, Time: revocationTime})
 	}
