@@ -252,7 +252,7 @@ func (s *Store) Delete(selector string) (Record, error) {
 }
 
 func (s *Store) Revoked() ([]RevokedEntry, error) {
-	rows, err := s.db.Query(`SELECT serial, revoked_at FROM certs WHERE status = 'R' ORDER BY id`)
+	rows, err := s.db.Query(`SELECT serial, revoked_at FROM certs WHERE status = 'R' AND type = 'cert' ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
