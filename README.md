@@ -119,7 +119,7 @@ xcert <子命令> [参数]
 | `debug` | `DEBUG` |
 | `trace` | `TRACE` |
 
-当环境变量 `TERM` 的值为 `xterm-256color` 时标签带颜色：`ERROR`、`FATAL`、`PANIC` 为红色，`WARN` 为黄色，`INFO` 为青色，`DEBUG`、`TRACE` 为白色。其他情况下输出纯文本。
+当标准错误是终端且未设置环境变量 `NO_COLOR` 时标签带颜色：`ERROR`、`FATAL`、`PANIC` 为红色，`WARN` 为黄色，`INFO` 为青色，`DEBUG`、`TRACE` 为白色。其他情况下输出纯文本。
 
 命令产生的数据（如 `db list`、`db show` 的结果）输出到标准输出，与日志分离，便于重定向。
 

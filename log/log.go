@@ -5,7 +5,18 @@ import (
 	"os"
 )
 
-var std = New(os.Stderr, LevelInfo, os.Getenv("TERM") == "xterm-256color")
+var std = New(os.Stderr, LevelInfo, colorSupported(os.Stderr))
+
+func colorSupported(file *os.File) bool {
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	info, err := file.Stat()
+	if err != nil {
+		return false
+	}
+	return info.Mode()&os.ModeCharDevice != 0
+}
 
 func SetLevel(level Level) {
 	std.SetLevel(level)
