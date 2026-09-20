@@ -388,6 +388,9 @@ func (s *Store) SetStatus(selector, status string) (original, updated Record, er
 	if err != nil {
 		return Record{}, Record{}, err
 	}
+	if record.Type != "cert" {
+		return Record{}, Record{}, fmt.Errorf("%s is a %s CA, only domain certificates can be revoked", record.Serial, record.Type)
+	}
 	original = record
 	var revokedAt any
 	if status == "R" {

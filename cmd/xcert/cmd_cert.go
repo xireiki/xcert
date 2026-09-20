@@ -101,6 +101,10 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 	if err := validateDays("--days", keyOptions.Days); err != nil {
 		return err
 	}
+	var err error
+	if dir, err = filepath.Abs(dir); err != nil {
+		return err
+	}
 	if codeSigning && csrFile != "" {
 		return fmt.Errorf("--code-signing requires a private key and cannot sign an external request")
 	}
@@ -108,7 +112,6 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 	if codeSigning {
 		extUsages = []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning}
 	} else {
-		var err error
 		extUsages, err = pki.ParseExtKeyUsage(extKeyUsage)
 		if err != nil {
 			return err

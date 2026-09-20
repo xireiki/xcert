@@ -286,6 +286,24 @@ func TestDBImport(t *testing.T) {
 	if len(records) != 1 || records[0].Type != "root" || records[0].Name != "RootCA" {
 		t.Fatalf("unexpected imported records: %+v", records)
 	}
+	if !filepath.IsAbs(records[0].CertPath) {
+		t.Fatalf("expected an absolute cert path, got %s", records[0].CertPath)
+	}
+	if err := execErr("db", "import", filepath.Join(ca, "RootCA.cer"), "-D", ca, "--type", "cert"); err == nil {
+		t.Fatal("expected the removed --type flag to be rejected")
+	}
+}
+
+func TestDeleteKeepsCAFiles(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca")
+	exec(t, "root", "-D", ca)
+	exec(t, "inte", "-D", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"))
+	exec(t, "db", "delete", "InteCA", "-D", ca)
+	for _, name := range []string{"InteCA.cer", "InteCA.csr"} {
+		if _, err := os.Stat(filepath.Join(ca, name)); err != nil {
+			t.Fatalf("expected %s to survive db delete: %v", name, err)
+		}
+	}
 }
 
 func TestDBImportRequiresIssuer(t *testing.T) {

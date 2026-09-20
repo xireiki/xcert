@@ -48,6 +48,10 @@ func runInte(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir, ce
 	if err := validateDays("--days", keyOptions.Days); err != nil {
 		return err
 	}
+	var err error
+	if dir, err = filepath.Abs(dir); err != nil {
+		return err
+	}
 	certPath := filepath.Join(dir, "InteCA.cer")
 	if pki.Exists(certPath) {
 		log.Warn("Intermediate certificate already exists")

@@ -105,7 +105,7 @@ Revoked:   %s
 }
 
 func newDBImportCommand(dir *string) *cobra.Command {
-	var keyPath, name, certType string
+	var keyPath, name string
 	cmd := &cobra.Command{
 		Use:           "import <cert-file>",
 		Short:         "Import an existing certificate file into the database",
@@ -118,7 +118,11 @@ func newDBImportCommand(dir *string) *cobra.Command {
 				return err
 			}
 			defer st.Close()
-			cert, err := pki.LoadCert(args[0])
+			certPath, err := filepath.Abs(args[0])
+			if err != nil {
+				return err
+			}
+			cert, err := pki.LoadCert(certPath)
 			if err != nil {
 				return err
 			}
@@ -131,24 +135,22 @@ func newDBImportCommand(dir *string) *cobra.Command {
 				log.Warn("record for serial %s already exists", serial)
 				return nil
 			}
-			if certType == "" {
-				certType = importCertType(cert)
-			}
-			switch certType {
-			case "root", "inte", "cert":
-			default:
-				return fmt.Errorf("invalid --type %q, expected root, inte or cert", certType)
-			}
+			certType := importCertType(cert)
 			if name == "" {
 				name = cert.Subject.CommonName
 			}
 			if name == "" {
 				return fmt.Errorf("certificate has no common name, set --name")
 			}
+			if keyPath != "" {
+				if keyPath, err = filepath.Abs(keyPath); err != nil {
+					return err
+				}
+			}
 			if err := verifyIssuedByCA(st, cert); err != nil {
 				return err
 			}
-			if err := st.Record(cert.SerialNumber, cert.Subject.String(), certType, name, args[0], keyPath, cert.NotBefore, cert.NotAfter); err != nil {
+			if err := st.Record(cert.SerialNumber, cert.Subject.String(), certType, name, certPath, keyPath, cert.NotBefore, cert.NotAfter); err != nil {
 				return err
 			}
 			log.Info("Imported %s (%s) as %s", serial, name, certType)
@@ -158,7 +160,6 @@ func newDBImportCommand(dir *string) *cobra.Command {
 	flags := cmd.Flags()
 	flags.StringVar(&keyPath, "key", "", "private key path to store in the record")
 	flags.StringVar(&name, "name", "", "record name (defaults to the certificate common name)")
-	flags.StringVar(&certType, "type", "", "record type: root, inte or cert (defaults to auto-detection)")
 	return cmd
 }
 
@@ -166,20 +167,21 @@ func importCertType(cert *x509.Certificate) string {
 	if !cert.IsCA {
 		return "cert"
 	}
-	if bytes.Equal(cert.RawIssuer, cert.RawSubject) {
+	if isSelfSigned(cert) {
 		return "root"
 	}
 	return "inte"
+}
+
+func isSelfSigned(cert *x509.Certificate) bool {
+	return cert.CheckSignatureFrom(cert) == nil
 }
 
 // verifyIssuedByCA checks the certificate signature: self-signed certificates
 // must verify against themselves, others must be signed by a CA already present
 // in the database.
 func verifyIssuedByCA(st *store.Store, cert *x509.Certificate) error {
-	if bytes.Equal(cert.RawIssuer, cert.RawSubject) {
-		if err := cert.CheckSignatureFrom(cert); err != nil {
-			return fmt.Errorf("invalid self-signed certificate: %w", err)
-		}
+	if isSelfSigned(cert) {
 		return nil
 	}
 	records, err := st.List()
@@ -225,9 +227,7 @@ func newDBDeleteCommand(dir *string) *cobra.Command {
 				return err
 			}
 			log.Info("Deleted %s (%s)", record.Serial, record.Name)
-			if record.Type == "cert" {
-				removeRecordFiles(record)
-			}
+			removeRecordFiles(record)
 			return nil
 		},
 	}
@@ -236,11 +236,23 @@ func newDBDeleteCommand(dir *string) *cobra.Command {
 }
 
 func removeRecordFiles(record store.Record) {
-	paths := []string{record.CertPath, record.KeyPath}
-	if record.CertPath != "" {
-		dir := filepath.Dir(record.CertPath)
-		base := strings.TrimSuffix(filepath.Base(record.CertPath), filepath.Ext(record.CertPath))
-		paths = append(paths, filepath.Join(dir, base+".csr"), filepath.Join(dir, base+".pfx"), filepath.Join(dir, "fullchain.cer"))
+	if record.CertPath == "" {
+		return
+	}
+	// Only delete artifacts of real leaf certificates; a CA record must never
+	// lose its certificate and key through "db delete".
+	cert, err := pki.LoadCert(record.CertPath)
+	if err != nil || cert.IsCA {
+		return
+	}
+	dir := filepath.Dir(record.CertPath)
+	base := strings.TrimSuffix(filepath.Base(record.CertPath), filepath.Ext(record.CertPath))
+	paths := []string{
+		record.CertPath,
+		record.KeyPath,
+		filepath.Join(dir, base+".csr"),
+		filepath.Join(dir, base+".pfx"),
+		filepath.Join(dir, "fullchain.cer"),
 	}
 	for _, path := range paths {
 		if path == "" {
@@ -303,12 +315,6 @@ func runSetStatus(dir, selector, status string, crlOptions *option.CRLOptions) e
 	original, record, err := st.SetStatus(selector, status)
 	if err != nil {
 		return err
-	}
-	if original.Type != "cert" {
-		if restoreErr := st.Restore(original); restoreErr != nil {
-			return fmt.Errorf("%s is a %s CA, only domain certificates can be revoked (status could not be restored: %v)", original.Serial, original.Type, restoreErr)
-		}
-		return fmt.Errorf("%s is a %s CA, only domain certificates can be revoked", original.Serial, original.Type)
 	}
 	verb := "Revoked"
 	if status == "V" {
