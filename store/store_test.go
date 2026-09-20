@@ -2,6 +2,7 @@ package store
 
 import (
 	"math/big"
+	"os"
 	"path/filepath"
 	"sync"
 	"testing"
@@ -173,5 +174,47 @@ func TestRecords(t *testing.T) {
 	}
 	if len(revoked) != 1 || revoked[0].Serial.Int64() != 1 {
 		t.Fatalf("expected the tombstone to stay revoked, got %+v", revoked)
+	}
+}
+
+func TestLegacyImport(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "serial"), []byte("02\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	index := "V\t310919022344Z\t\t00\tunknown\t/C=CN/CN=a.test\n" +
+		"R\t310919022344Z\t250101000000Z\t01\tunknown\t/C=CN/CN=b.test\n"
+	if err := os.WriteFile(filepath.Join(dir, "index.txt"), []byte(index), 0644); err != nil {
+		t.Fatal(err)
+	}
+	s, err := Open(filepath.Join(dir, FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer s.Close()
+
+	records, err := s.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("expected 2 imported records, got %d", len(records))
+	}
+	if records[1].Name != "b.test" || records[1].Status != "R" {
+		t.Fatalf("unexpected imported record: %+v", records[1])
+	}
+	revoked, err := s.Revoked()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(revoked) != 1 || revoked[0].Serial.Int64() != 1 {
+		t.Fatalf("expected the revoked entry to be imported, got %+v", revoked)
+	}
+	serial, err := s.NextSequentialSerial()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if serial.Int64() != 2 {
+		t.Fatalf("expected the serial counter seeded to 2, got %s", serial)
 	}
 }

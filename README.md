@@ -491,6 +491,16 @@ ca
 
 序列号默认使用 128 位随机数，不占用数据库计数器；使用 `--sequential-serial` 时读取 `serial` 计数器（初始为 `01`）并递增。`root` 始终使用随机序列号。CRL 编号使用独立的 `crl` 计数器。
 
+## 兼容旧的 xcert.sh 目录
+
+当 `-D` 指向由旧 `xcert.sh` 生成的 CA 目录时，工具会读取旧的文件结构与记录，以便继续签发新证书：
+
+- 私钥：兼容旧版 OpenSSL 生成的 `EC PARAMETERS` + `EC PRIVATE KEY` 文件，以及 RSA 私钥。
+- 记录：若目录中存在 `serial` 或 `index.txt`，会在首次打开时读取 `serial` 以续接 `--sequential-serial` 的计数器，并把 `index.txt` 中的已签发/已吊销记录导入 `xcert.db`。
+- 该目录结构已弃用，读取时会输出 `WARN` 级别的弃用警告。
+
+导入只发生一次（`certs` 表为空时），工具不会写回 `serial` 或 `index.txt`，新记录仍只写入 `xcert.db`。
+
 ## 协议符合性
 
 证书生成逻辑依据以下规范设计：

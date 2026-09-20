@@ -5,9 +5,12 @@ import (
 	"fmt"
 	"math/big"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
+
+	"xcert/log"
 
 	_ "modernc.org/sqlite"
 )
@@ -62,6 +65,10 @@ func Open(path string) (*Store, error) {
 	}
 	s := &Store{db: db}
 	if err := s.init(); err != nil {
+		db.Close()
+		return nil, err
+	}
+	if err := s.importLegacy(filepath.Dir(abs)); err != nil {
 		db.Close()
 		return nil, err
 	}
@@ -131,6 +138,126 @@ func (s *Store) ensureColumn(table, column, typ string) error {
 	}
 	_, err = s.db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, typ))
 	return err
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+// importLegacy reads the serial and index.txt files of a CA directory created
+// by the old xcert.sh script so new certificates continue the old numbering
+// and previously issued records are known. The layout is deprecated.
+func (s *Store) importLegacy(dir string) error {
+	serialPath := filepath.Join(dir, "serial")
+	indexPath := filepath.Join(dir, "index.txt")
+	if !fileExists(serialPath) && !fileExists(indexPath) {
+		return nil
+	}
+	log.Warn("legacy xcert.sh directory %s is deprecated, reading its serial and index.txt\n", dir)
+	if err := s.importLegacySerial(serialPath); err != nil {
+		return err
+	}
+	return s.importLegacyIndex(indexPath)
+}
+
+func (s *Store) importLegacySerial(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	n, ok := new(big.Int).SetString(strings.TrimSpace(string(data)), 16)
+	if !ok || n.Sign() <= 0 {
+		return nil
+	}
+	var current string
+	if err := s.db.QueryRow(`SELECT value FROM meta WHERE key = 'serial'`).Scan(&current); err != nil {
+		return err
+	}
+	cur, ok := new(big.Int).SetString(current, 16)
+	if ok && cur.Cmp(n) >= 0 {
+		return nil
+	}
+	_, err = s.db.Exec(`UPDATE meta SET value = ? WHERE key = 'serial'`, fmt.Sprintf("%02x", n))
+	return err
+}
+
+func (s *Store) importLegacyIndex(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	var count int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM certs`).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimRight(line, "\r")
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		fields := strings.Split(line, "\t")
+		if len(fields) < 6 {
+			continue
+		}
+		serial := strings.ToUpper(strings.TrimSpace(fields[3]))
+		subject := strings.TrimSpace(fields[5])
+		if serial == "" || subject == "" {
+			continue
+		}
+		status := "V"
+		var revokedAt any
+		if fields[0] == "R" {
+			status = "R"
+			if t, ok := parseLegacyTime(fields[2]); ok {
+				revokedAt = t.UTC().Format(time.RFC3339)
+			}
+		}
+		notAfter := now
+		if t, ok := parseLegacyTime(fields[1]); ok {
+			notAfter = t.UTC().Format(time.RFC3339)
+		}
+		if _, err := tx.Exec(
+			`INSERT INTO certs(serial, subject, type, name, status, not_before, not_after, cert_path, key_path, created_at, revoked_at)
+			 VALUES(?, ?, 'cert', ?, ?, ?, ?, '', '', ?, ?)`,
+			serial, subject, legacyCommonName(subject), status, now, notAfter, now, revokedAt,
+		); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+func parseLegacyTime(value string) (time.Time, bool) {
+	t, err := time.Parse("060102150405Z", strings.TrimSpace(value))
+	if err != nil {
+		return time.Time{}, false
+	}
+	return t, true
+}
+
+func legacyCommonName(subject string) string {
+	for _, part := range strings.Split(subject, "/") {
+		if strings.HasPrefix(part, "CN=") {
+			return strings.TrimPrefix(part, "CN=")
+		}
+	}
+	return subject
 }
 
 func (s *Store) Close() error {
