@@ -134,6 +134,7 @@ func addCRLFlags(cmd *cobra.Command, o *option.CRLOptions) {
 	flags.StringVar(&o.CACert, "ca-cert", "", "CA certificate used to sign the CRL")
 	flags.StringVar(&o.CAKey, "ca-key", "", "CA private key used to sign the CRL")
 	flags.StringVar(&o.CRL, "crl", "", "output CRL file")
+	flags.StringVar(&o.Digest, "digest", "sha512", "CRL signature digest algorithm (sha256, sha384, sha512)")
 	flags.IntVar(&o.Days, "crl-days", 30, "CRL validity in days")
 }
 
@@ -221,6 +222,9 @@ func writeCRL(dir string, o *option.CRLOptions, st *store.Store) error {
 	if err != nil {
 		return err
 	}
+	if err := pki.ValidateCRLSigner(issuer); err != nil {
+		return fmt.Errorf("%s: %w", caCert, err)
+	}
 	key, err := pki.LoadKey(caKey)
 	if err != nil {
 		return err
@@ -239,7 +243,7 @@ func writeCRL(dir string, o *option.CRLOptions, st *store.Store) error {
 		ThisUpdate: now,
 		NextUpdate: now.AddDate(0, 0, o.Days),
 	}
-	if tmpl.SignatureAlgorithm, err = pki.SignatureAlgorithm("sha512", key); err != nil {
+	if tmpl.SignatureAlgorithm, err = pki.SignatureAlgorithm(o.Digest, key); err != nil {
 		return err
 	}
 	for _, entry := range entries {

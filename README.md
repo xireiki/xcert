@@ -351,9 +351,10 @@ xcert <子命令> [参数]
 | `--ca-cert` | `<dir>/InteCA.cer` | 用于签发 CRL 的 CA 证书 |
 | `--ca-key` | `<dir>/InteCA.key` | 用于签发 CRL 的 CA 私钥 |
 | `--crl` | `<dir>/crl/<CA 文件名>.crl` | CRL 输出路径 |
+| `--digest` | `sha512` | CRL 签名摘要算法，可选 `sha256`、`sha384`、`sha512` |
 | `--crl-days` | `30` | CRL 的 `nextUpdate` 相对于当前时间的天数，必须为正数 |
 
-`revoke` 会先将匹配记录的状态更新为 `R` 并记录吊销时间，然后重新生成 CRL；`unrevoke` 会先将状态恢复为 `V` 并清除吊销时间，然后重新生成 CRL。若 CRL 生成失败，命令会报错并回滚状态修改，保持数据库与 CRL 一致。
+`revoke` 会先将匹配记录的状态更新为 `R` 并记录吊销时间，然后重新生成 CRL；`unrevoke` 会先将状态恢复为 `V` 并清除吊销时间，然后重新生成 CRL。若 CRL 生成失败，命令会报错并回滚状态修改，保持数据库与 CRL 一致。用于签发 CRL 的 CA 证书必须为 CA 证书且允许 CRL 签名。
 
 CRL 使用 `X509 CRL` PEM 格式，CRL 编号来自数据库 `meta` 表中的独立递增计数器。CRL 内容包含数据库中所有状态为 `R` 的域名证书记录。
 

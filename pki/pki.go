@@ -273,6 +273,16 @@ func ValidateCA(cert *x509.Certificate) error {
 	return nil
 }
 
+func ValidateCRLSigner(cert *x509.Certificate) error {
+	if err := ValidateCA(cert); err != nil {
+		return err
+	}
+	if cert.KeyUsage != 0 && cert.KeyUsage&x509.KeyUsageCRLSign == 0 {
+		return fmt.Errorf("issuer does not permit CRL signing")
+	}
+	return nil
+}
+
 func SignatureAlgorithm(digest string, key crypto.Signer) (x509.SignatureAlgorithm, error) {
 	switch key.(type) {
 	case *rsa.PrivateKey:

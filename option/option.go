@@ -20,5 +20,6 @@ type CRLOptions struct {
 	CACert string
 	CAKey  string
 	CRL    string
+	Digest string
 	Days   int
 }
