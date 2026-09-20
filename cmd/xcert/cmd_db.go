@@ -176,6 +176,10 @@ func runSetStatus(dir, selector, status string, crlOptions *option.CRLOptions) e
 	}
 	defer st.Close()
 
+	original, err := st.Resolve(selector)
+	if err != nil {
+		return err
+	}
 	record, err := st.SetStatus(selector, status)
 	if err != nil {
 		return err
@@ -186,7 +190,13 @@ func runSetStatus(dir, selector, status string, crlOptions *option.CRLOptions) e
 	}
 	log.Info("%s %s (%s)\n", verb, record.Serial, record.Name)
 
-	return writeCRL(dir, crlOptions, st)
+	if err := writeCRL(dir, crlOptions, st); err != nil {
+		if restoreErr := st.Restore(original); restoreErr != nil {
+			return fmt.Errorf("CRL update failed: %w (status could not be restored: %v)", err, restoreErr)
+		}
+		return fmt.Errorf("CRL update failed, status restored: %w", err)
+	}
+	return nil
 }
 
 func writeCRL(dir string, o *option.CRLOptions, st *store.Store) error {

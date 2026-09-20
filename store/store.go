@@ -243,6 +243,13 @@ func (s *Store) SetStatus(selector, status string) (Record, error) {
 	return record, nil
 }
 
+func (s *Store) Restore(record Record) error {
+	if _, err := s.db.Exec(`UPDATE certs SET status = ?, revoked_at = ? WHERE id = ?`, record.Status, record.RevokedAt, record.ID); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (s *Store) Delete(selector string) (Record, error) {
 	record, err := s.Resolve(selector)
 	if err != nil {
