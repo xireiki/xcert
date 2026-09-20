@@ -38,8 +38,20 @@ type RevokedEntry struct {
 }
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path+"?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)")
+	db, err := sql.Open("sqlite", path)
 	if err != nil {
+		return nil, err
+	}
+	// A single connection keeps the per-connection PRAGMAs effective and
+	// serializes writers inside the process.
+	db.SetMaxOpenConns(1)
+	if _, err := db.Exec("PRAGMA busy_timeout = 5000"); err != nil {
+		db.Close()
+		return nil, err
+	}
+	var journalMode string
+	if err := db.QueryRow("PRAGMA journal_mode = WAL").Scan(&journalMode); err != nil {
+		db.Close()
 		return nil, err
 	}
 	s := &Store{db: db}
