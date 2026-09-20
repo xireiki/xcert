@@ -163,6 +163,9 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		if err != nil {
 			return err
 		}
+		if err := pki.ValidateCA(parentCert); err != nil {
+			return fmt.Errorf("%s: %w", certFile, err)
+		}
 		parentKey, err := pki.LoadKey(keyFile)
 		if err != nil {
 			return err

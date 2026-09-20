@@ -87,6 +87,9 @@ func runInte(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir, ce
 	if err != nil {
 		return err
 	}
+	if err := pki.ValidateCA(parentCert); err != nil {
+		return fmt.Errorf("%s: %w", certFile, err)
+	}
 	parentKey, err := pki.LoadKey(keyFile)
 	if err != nil {
 		return err

@@ -222,6 +222,16 @@ func ValidUntil(issuer *x509.Certificate, days int, now time.Time) time.Time {
 	return notAfter
 }
 
+func ValidateCA(cert *x509.Certificate) error {
+	if !cert.IsCA {
+		return fmt.Errorf("issuer is not a CA certificate")
+	}
+	if cert.KeyUsage != 0 && cert.KeyUsage&x509.KeyUsageCertSign == 0 {
+		return fmt.Errorf("issuer does not permit certificate signing")
+	}
+	return nil
+}
+
 func SignatureAlgorithm(digest string, key crypto.Signer) (x509.SignatureAlgorithm, error) {
 	switch key.(type) {
 	case *rsa.PrivateKey:
