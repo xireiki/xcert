@@ -17,7 +17,10 @@ import (
 )
 
 func TestParseSubject(t *testing.T) {
-	name := ParseSubject("/C=CN/ST=Zhejiang/L=Hangzhou/O=Org/OU=Unit/CN=host/emailAddress=a@b")
+	name, err := ParseSubject("/C=CN/ST=Zhejiang/L=Hangzhou/O=Org/OU=Unit/CN=host/emailAddress=a@b")
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(name.Country) != 1 || name.Country[0] != "CN" {
 		t.Fatalf("unexpected country: %v", name.Country)
 	}
@@ -32,6 +35,9 @@ func TestParseSubject(t *testing.T) {
 	}
 	if len(name.ExtraNames) != 1 {
 		t.Fatalf("unexpected email attribute: %v", name.ExtraNames)
+	}
+	if _, err := ParseSubject("/CN=host/broken"); err == nil {
+		t.Fatal("expected error for a subject part without '='")
 	}
 }
 
@@ -167,6 +173,44 @@ func TestIssueSelfSignedCAPath(t *testing.T) {
 	}
 	if len(cert.SubjectKeyId) != 0 {
 		t.Fatalf("expected no subject key identifier, got %x", cert.SubjectKeyId)
+	}
+}
+
+func TestIssueRejectsMismatchedKey(t *testing.T) {
+	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	otherKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now()
+	caCert, _, err := IssueSelfSigned(caKey, IssueOptions{
+		Serial:       big.NewInt(1),
+		NotBefore:    now,
+		NotAfter:     now.Add(time.Hour),
+		KeyUsage:     x509.KeyUsageCertSign,
+		IsCA:         true,
+		SubjectKeyID: true,
+		Digest:       "sha512",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	leafKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Issue(leafKey.Public(), caCert, otherKey, IssueOptions{
+		Serial: big.NewInt(2), NotBefore: now, NotAfter: now.Add(time.Hour), Digest: "sha256",
+	}); err == nil {
+		t.Fatal("expected an error when the issuer key does not match the issuer certificate")
+	}
+	if _, _, err := Issue(leafKey.Public(), caCert, caKey, IssueOptions{
+		Serial: big.NewInt(3), NotBefore: now, NotAfter: now.Add(time.Hour), Digest: "sha256",
+	}); err != nil {
+		t.Fatal(err)
 	}
 }
 

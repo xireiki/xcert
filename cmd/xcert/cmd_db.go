@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"crypto/rand"
 	"crypto/x509"
 	"encoding/pem"
@@ -31,15 +32,12 @@ func newDBCommand() *cobra.Command {
 	cmd.AddCommand(
 		newDBListCommand(&dir),
 		newDBShowCommand(&dir),
+		newDBImportCommand(&dir),
 		newDBDeleteCommand(&dir),
 		newDBRevokeCommand(&dir),
 		newDBUnrevokeCommand(&dir),
 	)
 	return cmd
-}
-
-func openDB(dir string) (*store.Store, error) {
-	return openStore(dir)
 }
 
 func newDBListCommand(dir *string) *cobra.Command {
@@ -49,7 +47,7 @@ func newDBListCommand(dir *string) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			st, err := openDB(*dir)
+			st, err := openStore(*dir)
 			if err != nil {
 				return err
 			}
@@ -76,7 +74,7 @@ func newDBShowCommand(dir *string) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			st, err := openDB(*dir)
+			st, err := openStore(*dir)
 			if err != nil {
 				return err
 			}
@@ -106,6 +104,108 @@ Revoked:   %s
 	}
 }
 
+func newDBImportCommand(dir *string) *cobra.Command {
+	var keyPath, name, certType string
+	cmd := &cobra.Command{
+		Use:           "import <cert-file>",
+		Short:         "Import an existing certificate file into the database",
+		Args:          cobra.ExactArgs(1),
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			st, err := openStore(*dir)
+			if err != nil {
+				return err
+			}
+			defer st.Close()
+			cert, err := pki.LoadCert(args[0])
+			if err != nil {
+				return err
+			}
+			serial := strings.ToUpper(fmt.Sprintf("%x", cert.SerialNumber))
+			exists, err := st.HasSerial(serial)
+			if err != nil {
+				return err
+			}
+			if exists {
+				log.Warn("record for serial %s already exists", serial)
+				return nil
+			}
+			if certType == "" {
+				certType = importCertType(cert)
+			}
+			switch certType {
+			case "root", "inte", "cert":
+			default:
+				return fmt.Errorf("invalid --type %q, expected root, inte or cert", certType)
+			}
+			if name == "" {
+				name = cert.Subject.CommonName
+			}
+			if name == "" {
+				return fmt.Errorf("certificate has no common name, set --name")
+			}
+			if err := verifyIssuedByCA(st, cert); err != nil {
+				return err
+			}
+			if err := st.Record(cert.SerialNumber, cert.Subject.String(), certType, name, args[0], keyPath, cert.NotBefore, cert.NotAfter); err != nil {
+				return err
+			}
+			log.Info("Imported %s (%s) as %s", serial, name, certType)
+			return nil
+		},
+	}
+	flags := cmd.Flags()
+	flags.StringVar(&keyPath, "key", "", "private key path to store in the record")
+	flags.StringVar(&name, "name", "", "record name (defaults to the certificate common name)")
+	flags.StringVar(&certType, "type", "", "record type: root, inte or cert (defaults to auto-detection)")
+	return cmd
+}
+
+func importCertType(cert *x509.Certificate) string {
+	if !cert.IsCA {
+		return "cert"
+	}
+	if bytes.Equal(cert.RawIssuer, cert.RawSubject) {
+		return "root"
+	}
+	return "inte"
+}
+
+// verifyIssuedByCA checks the certificate signature: self-signed certificates
+// must verify against themselves, others must be signed by a CA already present
+// in the database.
+func verifyIssuedByCA(st *store.Store, cert *x509.Certificate) error {
+	if bytes.Equal(cert.RawIssuer, cert.RawSubject) {
+		if err := cert.CheckSignatureFrom(cert); err != nil {
+			return fmt.Errorf("invalid self-signed certificate: %w", err)
+		}
+		return nil
+	}
+	records, err := st.List()
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, record := range records {
+		if record.Type != "root" && record.Type != "inte" {
+			continue
+		}
+		issuer, err := pki.LoadCert(record.CertPath)
+		if err != nil || !bytes.Equal(issuer.RawSubject, cert.RawIssuer) {
+			continue
+		}
+		found = true
+		if cert.CheckSignatureFrom(issuer) == nil {
+			return nil
+		}
+	}
+	if found {
+		return fmt.Errorf("certificate signature is not valid for any CA in the database")
+	}
+	return fmt.Errorf("issuer CA not found in database, import the issuer certificate first")
+}
+
 func newDBDeleteCommand(dir *string) *cobra.Command {
 	var force bool
 	cmd := &cobra.Command{
@@ -115,7 +215,7 @@ func newDBDeleteCommand(dir *string) *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			st, err := openDB(*dir)
+			st, err := openStore(*dir)
 			if err != nil {
 				return err
 			}
@@ -124,7 +224,7 @@ func newDBDeleteCommand(dir *string) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			log.Info("Deleted %s (%s)\n", record.Serial, record.Name)
+			log.Info("Deleted %s (%s)", record.Serial, record.Name)
 			if record.Type == "cert" {
 				removeRecordFiles(record)
 			}
@@ -140,14 +240,14 @@ func removeRecordFiles(record store.Record) {
 	if record.CertPath != "" {
 		dir := filepath.Dir(record.CertPath)
 		base := strings.TrimSuffix(filepath.Base(record.CertPath), filepath.Ext(record.CertPath))
-		paths = append(paths, filepath.Join(dir, base+".csr"), filepath.Join(dir, "fullchain.cer"))
+		paths = append(paths, filepath.Join(dir, base+".csr"), filepath.Join(dir, base+".pfx"), filepath.Join(dir, "fullchain.cer"))
 	}
 	for _, path := range paths {
 		if path == "" {
 			continue
 		}
 		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-			log.Warn("failed to remove %s: %v\n", path, err)
+			log.Warn("failed to remove %s: %v", path, err)
 		}
 	}
 }
@@ -194,25 +294,27 @@ func newDBUnrevokeCommand(dir *string) *cobra.Command {
 }
 
 func runSetStatus(dir, selector, status string, crlOptions *option.CRLOptions) error {
-	st, err := openDB(dir)
+	st, err := openStore(dir)
 	if err != nil {
 		return err
 	}
 	defer st.Close()
 
-	original, err := st.Resolve(selector)
+	original, record, err := st.SetStatus(selector, status)
 	if err != nil {
 		return err
 	}
-	record, err := st.SetStatus(selector, status)
-	if err != nil {
-		return err
+	if original.Type != "cert" {
+		if restoreErr := st.Restore(original); restoreErr != nil {
+			return fmt.Errorf("%s is a %s CA, only domain certificates can be revoked (status could not be restored: %v)", original.Serial, original.Type, restoreErr)
+		}
+		return fmt.Errorf("%s is a %s CA, only domain certificates can be revoked", original.Serial, original.Type)
 	}
 	verb := "Revoked"
 	if status == "V" {
 		verb = "Unrevoked"
 	}
-	log.Info("%s %s (%s)\n", verb, record.Serial, record.Name)
+	log.Info("%s %s (%s)", verb, record.Serial, record.Name)
 
 	if err := writeCRL(dir, crlOptions, st); err != nil {
 		if restoreErr := st.Restore(original); restoreErr != nil {
@@ -252,22 +354,27 @@ func writeCRL(dir string, o *option.CRLOptions, st *store.Store) error {
 	if err != nil {
 		return err
 	}
-	number, err := st.NextCRLNumber()
-	if err != nil {
-		return err
+	if !pki.MatchesKey(issuer, key) {
+		return fmt.Errorf("%s does not match %s", caKey, caCert)
 	}
 	entries, err := st.Revoked()
 	if err != nil {
 		return err
 	}
+	sig, err := pki.SignatureAlgorithm(o.Digest, key)
+	if err != nil {
+		return err
+	}
+	number, err := st.NextCRLNumber()
+	if err != nil {
+		return err
+	}
 	now := time.Now()
 	tmpl := &x509.RevocationList{
-		Number:     number,
-		ThisUpdate: now,
-		NextUpdate: now.AddDate(0, 0, o.Days),
-	}
-	if tmpl.SignatureAlgorithm, err = pki.SignatureAlgorithm(o.Digest, key); err != nil {
-		return err
+		Number:             number,
+		ThisUpdate:         now,
+		NextUpdate:         now.AddDate(0, 0, o.Days),
+		SignatureAlgorithm: sig,
 	}
 	for _, entry := range entries {
 		tmpl.RevokedCertificateEntries = append(tmpl.RevokedCertificateEntries, x509.RevocationListEntry{
@@ -285,6 +392,6 @@ func writeCRL(dir string, o *option.CRLOptions, st *store.Store) error {
 	if err := pki.WriteFile(crlPath, pem.EncodeToMemory(&pem.Block{Type: "X509 CRL", Bytes: der}), 0644); err != nil {
 		return err
 	}
-	log.Info("CRL written to %s\n", crlPath)
+	log.Info("CRL written to %s", crlPath)
 	return nil
 }

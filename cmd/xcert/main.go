@@ -8,7 +8,7 @@ import (
 
 func main() {
 	if err := newCLI().Execute(); err != nil {
-		log.Error("%s\n", err)
+		log.Error("%s", err)
 		os.Exit(1)
 	}
 }

@@ -50,7 +50,7 @@ func runInte(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir, ce
 	}
 	certPath := filepath.Join(dir, "InteCA.cer")
 	if pki.Exists(certPath) {
-		log.Warn("Intermediate certificate already exists\n")
+		log.Warn("Intermediate certificate already exists")
 		return nil
 	}
 	if certFile == "" || keyFile == "" {
@@ -73,17 +73,9 @@ func runInte(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir, ce
 		return err
 	}
 	defer st.Close()
-	log.Info("Start generating certificate\n")
+	log.Info("Start generating certificate")
 
 	keyPath := filepath.Join(dir, "InteCA.key")
-	keySigner, err := pki.EnsureKey(keyPath, keyOptions.Cipher, keyOptions.Bits)
-	if err != nil {
-		return err
-	}
-	subject := pki.ParseSubject(keyOptions.Subject)
-	if err := pki.EnsureCSR(filepath.Join(dir, "InteCA.csr"), subject, nil, keySigner); err != nil {
-		return err
-	}
 	parentCert, err := pki.LoadCert(certFile)
 	if err != nil {
 		return err
@@ -101,6 +93,17 @@ func runInte(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir, ce
 	}
 	extUsage, err := pki.ParseExtKeyUsage(caOptions.ExtKeyUsage)
 	if err != nil {
+		return err
+	}
+	subject, err := pki.ParseSubject(keyOptions.Subject)
+	if err != nil {
+		return err
+	}
+	keySigner, err := pki.EnsureKey(keyPath, keyOptions.Cipher, keyOptions.Bits)
+	if err != nil {
+		return err
+	}
+	if err := pki.EnsureCSR(filepath.Join(dir, "InteCA.csr"), subject, nil, keySigner); err != nil {
 		return err
 	}
 
@@ -143,6 +146,6 @@ func runInte(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir, ce
 		return err
 	}
 
-	log.Info("Done.\n")
+	log.Info("Done.")
 	return nil
 }

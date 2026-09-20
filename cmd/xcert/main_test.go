@@ -266,6 +266,66 @@ func TestCodeSigningIssuerRestriction(t *testing.T) {
 	}
 }
 
+func TestDBImport(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca")
+	exec(t, "root", "-D", ca)
+	if err := os.Remove(filepath.Join(ca, store.FileName)); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, "db", "import", filepath.Join(ca, "RootCA.cer"), "-D", ca, "--name", "RootCA")
+
+	st, err := store.Open(filepath.Join(ca, store.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	records, err := st.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Type != "root" || records[0].Name != "RootCA" {
+		t.Fatalf("unexpected imported records: %+v", records)
+	}
+}
+
+func TestDBImportRequiresIssuer(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca")
+	exec(t, "root", "-D", ca)
+	exec(t, "inte", "-D", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"))
+	exec(t, "cert", "-D", ca, "-d", "example.com")
+	if err := os.Remove(filepath.Join(ca, store.FileName)); err != nil {
+		t.Fatal(err)
+	}
+	leaf := filepath.Join(ca, "certs", "example.com_ecc", "example.com.cer")
+	if err := execErr("db", "import", leaf, "-D", ca); err == nil {
+		t.Fatal("expected importing a leaf without its issuer in the database to fail")
+	}
+}
+
+func TestRevokeCARejected(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca")
+	exec(t, "root", "-D", ca)
+	exec(t, "inte", "-D", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"))
+	if err := execErr("db", "revoke", "InteCA", "-D", ca); err == nil {
+		t.Fatal("expected revoking an intermediate CA to be rejected")
+	}
+	if _, err := os.Stat(filepath.Join(ca, "crl", "InteCA.crl")); !os.IsNotExist(err) {
+		t.Fatal("expected no CRL to be written when the CA revoke is rejected")
+	}
+	st, err := store.Open(filepath.Join(ca, store.FileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	record, err := st.Resolve("InteCA")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if record.Status != "V" {
+		t.Fatalf("expected the CA record to stay valid, got %s", record.Status)
+	}
+}
+
 func exec(t *testing.T, args ...string) {
 	t.Helper()
 	if err := execErr(args...); err != nil {

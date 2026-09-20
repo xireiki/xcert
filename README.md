@@ -150,7 +150,7 @@ xcert <子命令> [参数]
 | `CN` | 通用名称（Common Name） |
 | `emailAddress` 或 `E` | 电子邮件地址 |
 
-`C`、`ST`、`L`、`O`、`OU` 可重复出现并会累积为多值；`CN` 每次出现都会覆盖之前的值，`emailAddress` 可重复出现并累积为多值。空字段会被忽略。
+`C`、`ST`、`L`、`O`、`OU` 可重复出现并会累积为多值；`CN` 每次出现都会覆盖之前的值，`emailAddress` 可重复出现并累积为多值。空字段会被忽略；缺少 `=` 的片段会报错，不再被静默丢弃。
 
 ## root：创建根证书
 
@@ -345,6 +345,7 @@ xcert <子命令> [参数]
 | --- | --- |
 | `db list` | 列出数据库中的全部记录 |
 | `db show <serial\|name>` | 按序列号或名称显示一条记录 |
+| `db import <cert-file>` | 把已有的证书文件补录进数据库 |
 | `db delete <serial\|name>` | 删除一条记录；已吊销记录需加 `--force`，删除后保留墓碑 |
 | `db revoke <serial\|name>` | 将记录状态标记为已吊销并重新生成 CRL |
 | `db unrevoke <serial\|name>` | 将记录状态恢复为有效并重新生成 CRL |
@@ -381,6 +382,18 @@ xcert <子命令> [参数]
 | `Created` | 记录创建时间 |
 | `Revoked` | 吊销时间，未吊销时为空 |
 
+### db import 参数
+
+把一个已存在的证书文件补录进数据库，用于 `xcert.db` 丢失或损坏后恢复记录，或导入外部生成的证书。
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `--key` | 空 | 记录中保存的私钥路径 |
+| `--name` | 证书的 `CN` | 记录名称 |
+| `--type` | 自动判断 | 记录类型：`root`、`inte` 或 `cert`；默认按是否 CA、是否自签判断 |
+
+`db import <cert-file>` 从证书中读取序列号、主体、`NotBefore`、`NotAfter` 并写入数据库。若该序列号已有记录则输出警告并跳过。导入前会验证证书签名：自签证书必须自签有效（且为 CA），其他证书必须能由数据库 `root`/`inte` 记录中已存在的签发 CA 验签通过，否则报错；因此导入顺序应为根证书、中间证书、叶证书。
+
 ### delete 参数
 
 在 `-D` / `--dir` 之外，还支持：
@@ -389,7 +402,7 @@ xcert <子命令> [参数]
 | --- | --- | --- |
 | `--force` | `false` | 删除已吊销记录；删除后保留一条墓碑记录，使该序列号继续出现在 CRL 中 |
 
-`db delete` 删除数据库记录；对于域名证书（`cert`），会一并删除对应的 `<CN>.cer`、`<CN>.key`、`<CN>.csr` 与 `fullchain.cer`。已吊销（`R`）的记录默认拒绝删除，需加 `--force`；加 `--force` 后记录被软删除，`db list` 不再显示，但其序列号仍保留在 CRL 中。`root`、`inte` 记录只删除数据库行，不删除 CA 文件。
+`db delete` 删除数据库记录；对于域名证书（`cert`），会一并删除对应的 `<CN>.cer`、`<CN>.key`、`<CN>.csr`、`<CN>.pfx` 与 `fullchain.cer`。已吊销（`R`）的记录默认拒绝删除，需加 `--force`；加 `--force` 后记录被软删除，`db list` 不再显示，但其序列号仍保留在 CRL 中。`root`、`inte` 记录只删除数据库行，不删除 CA 文件。
 
 ### revoke / unrevoke 参数
 
@@ -403,9 +416,9 @@ xcert <子命令> [参数]
 | `--digest` | `sha512` | CRL 签名摘要算法，可选 `sha256`、`sha384`、`sha512` |
 | `--crl-days` | `30` | CRL 的 `nextUpdate` 相对于当前时间的天数，必须为正数 |
 
-`revoke` 会先将匹配记录的状态更新为 `R` 并记录吊销时间，然后重新生成 CRL；`unrevoke` 会先将状态恢复为 `V` 并清除吊销时间，然后重新生成 CRL。若 CRL 生成失败，命令会报错并回滚状态修改，保持数据库与 CRL 一致。用于签发 CRL 的 CA 证书必须为 CA 证书且允许 CRL 签名。
+`revoke` 会先将匹配记录的状态更新为 `R` 并记录吊销时间，然后重新生成 CRL；`unrevoke` 会先将状态恢复为 `V` 并清除吊销时间，然后重新生成 CRL。若 CRL 生成失败，命令会报错并回滚状态修改，保持数据库与 CRL 一致。用于签发 CRL 的 CA 证书必须为 CA 证书且允许 CRL 签名，且其私钥必须与证书匹配。`root`、`inte` 记录不允许吊销或解除吊销：CRL 只收录域名证书，吊销 CA 记录会报错。
 
-CRL 使用 `X509 CRL` PEM 格式，CRL 编号来自数据库 `meta` 表中的独立递增计数器。CRL 内容包含数据库中所有状态为 `R` 的域名证书记录，包括已软删除的墓碑记录。
+CRL 使用 `X509 CRL` PEM 格式，CRL 编号来自数据库 `meta` 表中的独立递增计数器，在签名前取号。CRL 内容包含数据库中所有状态为 `R` 的域名证书记录，包括已软删除的墓碑记录。
 
 ## 证书能力参数详解
 
@@ -540,7 +553,7 @@ ca
 - 记录：若目录中存在 `serial` 或 `index.txt`，会在首次打开时读取 `serial` 以续接 `--sequential-serial` 的计数器，并把 `index.txt` 中的已签发/已吊销记录导入 `xcert.db`。
 - 该目录结构已弃用，读取时会输出 `WARN` 级别的弃用警告。
 
-导入只发生一次（`certs` 表为空时），工具不会写回 `serial` 或 `index.txt`，新记录仍只写入 `xcert.db`。不加 `--legacy` 时，`serial` 与 `index.txt` 会被忽略。
+导入只发生一次（`certs` 表为空时），工具不会写回 `serial` 或 `index.txt`，新记录仍只写入 `xcert.db`。不加 `--legacy` 时，`serial` 与 `index.txt` 会被忽略。导入存在两个已知降级点：`index.txt` 无法区分类别，所有记录都按 `cert` 类型导入；记录没有原始生效时间，`not_before` 统一写为导入时刻。如果这会影响使用，可用 `db import` 重新补录具体证书。
 
 ## 协议符合性
 

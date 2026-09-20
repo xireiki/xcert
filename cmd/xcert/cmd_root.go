@@ -42,7 +42,7 @@ func runRoot(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir str
 	}
 	certPath := filepath.Join(dir, "RootCA.cer")
 	if pki.Exists(certPath) {
-		log.Warn("Root certificate already exists\n")
+		log.Warn("Root certificate already exists")
 		return nil
 	}
 	for _, name := range []string{"newcerts", "crl"} {
@@ -52,15 +52,19 @@ func runRoot(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir str
 	}
 
 	keyPath := filepath.Join(dir, "RootCA.key")
-	key, err := pki.EnsureKey(keyPath, keyOptions.Cipher, keyOptions.Bits)
-	if err != nil {
-		return err
-	}
 	usage, err := pki.ParseKeyUsage(caOptions.KeyUsage)
 	if err != nil {
 		return err
 	}
 	extUsage, err := pki.ParseExtKeyUsage(caOptions.ExtKeyUsage)
+	if err != nil {
+		return err
+	}
+	subject, err := pki.ParseSubject(keyOptions.Subject)
+	if err != nil {
+		return err
+	}
+	key, err := pki.EnsureKey(keyPath, keyOptions.Cipher, keyOptions.Bits)
 	if err != nil {
 		return err
 	}
@@ -72,7 +76,7 @@ func runRoot(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir str
 	now := time.Now()
 	cert, der, err := pki.IssueSelfSigned(key, pki.IssueOptions{
 		Serial:         serial,
-		Subject:        pki.ParseSubject(keyOptions.Subject),
+		Subject:        subject,
 		NotBefore:      now.Add(-time.Minute),
 		NotAfter:       now.AddDate(0, 0, keyOptions.Days),
 		KeyUsage:       usage,
@@ -100,6 +104,6 @@ func runRoot(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir str
 		return err
 	}
 
-	log.Info("Done.\n")
+	log.Info("Done.")
 	return nil
 }

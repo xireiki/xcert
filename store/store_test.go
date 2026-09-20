@@ -140,7 +140,7 @@ func TestRecords(t *testing.T) {
 		t.Fatal("expected ambiguous selector error")
 	}
 
-	record, err = s.SetStatus("a.test", "R")
+	_, record, err = s.SetStatus("a.test", "R")
 	if err != nil {
 		t.Fatal(err)
 	}

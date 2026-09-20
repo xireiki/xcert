@@ -151,8 +151,11 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		publicKey = csr.PublicKey
 		cipher = pki.KeyCipher(publicKey)
 	} else {
-		var err error
-		name, cn, dnsNames, err = resolveNames(pki.ParseSubject(keyOptions.Subject), domains)
+		subject, err := pki.ParseSubject(keyOptions.Subject)
+		if err != nil {
+			return err
+		}
+		name, cn, dnsNames, err = resolveNames(subject, domains)
 		if err != nil {
 			return err
 		}
@@ -162,7 +165,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		}
 	}
 
-	log.Info("Start generating certificate\n")
+	log.Info("Start generating certificate")
 
 	st, err := openStore(dir)
 	if err != nil {
@@ -181,7 +184,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		artifactPath = pfxPath
 	}
 	if pki.Exists(artifactPath) {
-		log.Warn("Certificate for domain name %s already exist\n", cn)
+		log.Warn("Certificate for domain name %s already exist", cn)
 		return nil
 	}
 
@@ -308,7 +311,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		done = done && pki.Exists(keyPath)
 	}
 	if done {
-		log.Info("Done.\n")
+		log.Info("Done.")
 	}
 	return nil
 }

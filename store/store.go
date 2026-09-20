@@ -150,7 +150,7 @@ func (s *Store) LoadLegacy(dir string) error {
 	if !fileExists(serialPath) && !fileExists(indexPath) {
 		return nil
 	}
-	log.Warn("legacy xcert.sh directory %s is deprecated, reading its serial and index.txt\n", dir)
+	log.Warn("legacy xcert.sh directory %s is deprecated, reading its serial and index.txt", dir)
 	if err := s.importLegacySerial(serialPath); err != nil {
 		return err
 	}
@@ -334,8 +334,12 @@ func (s *Store) List() ([]Record, error) {
 	return scanRecords(rows)
 }
 
-func (s *Store) Find(selector string) ([]Record, error) {
-	rows, err := s.db.Query(
+type queryer interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+}
+
+func find(q queryer, selector string) ([]Record, error) {
+	rows, err := q.Query(
 		`SELECT `+recordColumns+` FROM certs WHERE deleted = 0 AND (lower(serial) = lower(?) OR name = ?) ORDER BY id`,
 		selector, selector,
 	)
@@ -345,8 +349,8 @@ func (s *Store) Find(selector string) ([]Record, error) {
 	return scanRecords(rows)
 }
 
-func (s *Store) Resolve(selector string) (Record, error) {
-	records, err := s.Find(selector)
+func resolve(q queryer, selector string) (Record, error) {
+	records, err := find(q, selector)
 	if err != nil {
 		return Record{}, err
 	}
@@ -360,11 +364,31 @@ func (s *Store) Resolve(selector string) (Record, error) {
 	}
 }
 
-func (s *Store) SetStatus(selector, status string) (Record, error) {
-	record, err := s.Resolve(selector)
+func (s *Store) Find(selector string) ([]Record, error) {
+	return find(s.db, selector)
+}
+
+func (s *Store) Resolve(selector string) (Record, error) {
+	return resolve(s.db, selector)
+}
+
+func (s *Store) HasSerial(serial string) (bool, error) {
+	var count int
+	err := s.db.QueryRow(`SELECT COUNT(*) FROM certs WHERE lower(serial) = lower(?)`, serial).Scan(&count)
+	return count > 0, err
+}
+
+func (s *Store) SetStatus(selector, status string) (original, updated Record, err error) {
+	tx, err := s.db.Begin()
 	if err != nil {
-		return Record{}, err
+		return Record{}, Record{}, err
 	}
+	defer tx.Rollback()
+	record, err := resolve(tx, selector)
+	if err != nil {
+		return Record{}, Record{}, err
+	}
+	original = record
 	var revokedAt any
 	if status == "R" {
 		timestamp := time.Now().UTC().Format(time.RFC3339)
@@ -373,11 +397,14 @@ func (s *Store) SetStatus(selector, status string) (Record, error) {
 	} else {
 		record.RevokedAt = sql.NullString{}
 	}
-	if _, err := s.db.Exec(`UPDATE certs SET status = ?, revoked_at = ? WHERE id = ?`, status, revokedAt, record.ID); err != nil {
-		return Record{}, err
+	if _, err := tx.Exec(`UPDATE certs SET status = ?, revoked_at = ? WHERE id = ?`, status, revokedAt, record.ID); err != nil {
+		return Record{}, Record{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return Record{}, Record{}, err
 	}
 	record.Status = status
-	return record, nil
+	return original, record, nil
 }
 
 func (s *Store) Restore(record Record) error {

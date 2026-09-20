@@ -39,17 +39,17 @@ type IssueOptions struct {
 	AuthorityKeyID bool
 }
 
-func ParseSubject(s string) pkix.Name {
+func ParseSubject(s string) (pkix.Name, error) {
 	var n pkix.Name
 	for _, part := range strings.Split(s, "/") {
 		if part == "" {
 			continue
 		}
-		kv := strings.SplitN(part, "=", 2)
-		if len(kv) != 2 {
-			continue
+		k, v, ok := strings.Cut(part, "=")
+		if !ok {
+			return pkix.Name{}, fmt.Errorf("invalid subject part %q, expected key=value", part)
 		}
-		k, v := strings.TrimSpace(strings.ToUpper(kv[0])), kv[1]
+		k = strings.TrimSpace(strings.ToUpper(k))
 		switch k {
 		case "C":
 			n.Country = append(n.Country, v)
@@ -67,7 +67,7 @@ func ParseSubject(s string) pkix.Name {
 			n.ExtraNames = append(n.ExtraNames, pkix.AttributeTypeAndValue{Type: oidEmail, Value: v})
 		}
 	}
-	return n
+	return n, nil
 }
 
 func ValidateCipher(cipher string) error {
@@ -240,6 +240,11 @@ func publicKeysEqual(a, b crypto.PublicKey) bool {
 		return false
 	}
 	return bytes.Equal(derA, derB)
+}
+
+// MatchesKey reports whether the private key belongs to the certificate.
+func MatchesKey(cert *x509.Certificate, key crypto.Signer) bool {
+	return publicKeysEqual(cert.PublicKey, key.Public())
 }
 
 func sameStringSet(a, b []string) bool {
@@ -447,6 +452,9 @@ func IssueSelfSigned(key crypto.Signer, o IssueOptions) (*x509.Certificate, []by
 }
 
 func Issue(publicKey crypto.PublicKey, parent *x509.Certificate, parentKey crypto.Signer, o IssueOptions) (*x509.Certificate, []byte, error) {
+	if !MatchesKey(parent, parentKey) {
+		return nil, nil, fmt.Errorf("issuer certificate %q does not match the supplied private key", parent.Subject)
+	}
 	sig, err := SignatureAlgorithm(o.Digest, parentKey)
 	if err != nil {
 		return nil, nil, err
