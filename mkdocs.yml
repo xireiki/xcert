@@ -1,0 +1,48 @@
+site_name: xcert
+site_description: 用 Go 实现的 X.509 证书颁发工具
+site_url: https://xireiki.github.io/xcert/
+repo_url: https://github.com/xireiki/xcert
+repo_name: xireiki/xcert
+docs_dir: docs
+
+theme:
+  name: material
+  language: zh
+  logo: icon.svg
+  favicon: icon.svg
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-night
+        name: 切换到深色模式
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-sunny
+        name: 切换到浅色模式
+  features:
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+nav:
+  - 首页: index.md
+  - English: index.en.md
+  - 更新日志: changelog.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - toc:
+      permalink: true
+      slugify: !!python/object/apply:pymdownx.slugs.slugify
+        kwds:
+          case: lower
+  - pymdownx.highlight
+  - pymdownx.superfences
+  - pymdownx.details
+
+plugins:
+  - search
