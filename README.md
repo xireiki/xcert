@@ -254,10 +254,8 @@ xcert <子命令> [参数]
 ### 名称与 SAN 规则
 
 - 通用名称 `CN` 与 `subjectAltName` 始终写入，满足 RFC 6125 主机名校验要求。
-- 若通过 `-d` 指定了至少一个域名，`CN` 取第一个域名，`subjectAltName` 包含全部域名。
-- 若 `-d` 指定了域名且 `--subject` 未包含 `CN`，会自动将第一个域名写入主体 `CN`。
+- 若通过 `-d` 指定了至少一个域名，主体 `CN` 取第一个域名（覆盖 `--subject` 或证书请求中的 `CN`），`subjectAltName` 包含全部域名。
 - 若未指定 `-d`，则取 `--subject` 中的 `CN` 作为域名并写入 `subjectAltName`。
-- 若 `--subject` 的 `CN` 存在且不在域名列表中，会一并追加到 `subjectAltName`。
 - 若 `-d` 与 `--subject` 的 `CN` 都为空，报错。
 - 通用名称会进行路径安全校验：为空、等于 `.` 或 `..`、包含路径分隔符或控制字符时拒绝，避免输出路径逃逸 CA 目录。
 

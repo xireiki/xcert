@@ -68,10 +68,8 @@ func resolveNames(name pkix.Name, domains []string) (pkix.Name, string, []string
 	var dnsNames []string
 	if len(domains) >= 1 {
 		cn = domains[0]
+		name.CommonName = cn
 		dnsNames = append(dnsNames, domains...)
-		if name.CommonName == "" {
-			name.CommonName = cn
-		}
 	}
 	if cn == "" {
 		return name, "", nil, fmt.Errorf("common name is empty, set --domain or --subject")
@@ -81,9 +79,6 @@ func resolveNames(name pkix.Name, domains []string) (pkix.Name, string, []string
 	}
 	if len(dnsNames) == 0 {
 		dnsNames = append(dnsNames, cn)
-	}
-	if name.CommonName != "" && !containsString(dnsNames, name.CommonName) {
-		dnsNames = append(dnsNames, name.CommonName)
 	}
 	return name, cn, dnsNames, nil
 }
