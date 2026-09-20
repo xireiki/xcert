@@ -4,6 +4,10 @@
 
 - 每次提交前必须同步更新 `README.md`，确保其中记录的子命令、参数、默认值、文件布局与行为与代码一致。
 - 仅在用户明确要求提交时才执行提交，且提交前先运行 `go vet ./...` 与 `go test ./...`。
+- 提交信息统一采用约定式提交（Conventional Commits）：`<type>(<scope>): <description>`。
+  - 常用 `type`：`feat`、`fix`、`refactor`、`docs`、`test`、`chore`、`perf`、`build`、`ci`。
+  - 破坏性变更在 `type` 后加 `!`，并在正文以 `BREAKING CHANGE:` 页脚说明。
+  - 描述使用祈使句、简短明确，正文说明「做了什么、为什么」。
 
 ## 构建与测试
 
