@@ -587,11 +587,25 @@ Serial numbers use a random 128-bit value by default and do not consume the data
 
 ### Legacy xcert.sh directory
 
-With the global flag `--legacy` and `-D` pointing at a CA directory produced by the old `xcert.sh`, the tool reads the legacy file structure and records so new certificates can continue to be issued:
+With the global flag `--legacy` and `-D` pointing at a CA directory produced by the old [`xcert.sh`](https://gist.github.com/xireiki/acb4b35c49538ccfdb98c014747edc74), the tool reads the legacy file structure and records so new certificates can continue to be issued:
 
 - Private keys: supports legacy OpenSSL `EC PARAMETERS` + `EC PRIVATE KEY` files, as well as RSA private keys.
 - Records: if `serial` or `index.txt` exists in the directory, the first open reads `serial` to continue the `--sequential-serial` counter, and imports issued/revoked records from `index.txt` into `xcert.db`.
 - This directory structure is deprecated and produces a `WARN`-level deprecation warning when read.
+
+#### How to import (xcert.sh)
+
+The import happens automatically the first time the database is opened; there is no separate command. Run any command in the legacy directory with `--legacy`, for example:
+
+```sh
+xcert --legacy db list -D ./oldca
+```
+
+The first run creates `xcert.db` under `./oldca`, writes `serial` into the `meta.serial` counter, imports the records from `index.txt` into the `certs` table, and prints a `WARN`-level deprecation warning. Once imported, the records live in `xcert.db`, so later commands can drop `--legacy`:
+
+```sh
+xcert db list -D ./oldca
+```
 
 The import happens only once (when the `certs` table is empty), and the tool never writes back to `serial` or `index.txt`; new records are still written only to `xcert.db`. Without `--legacy`, `serial` and `index.txt` are ignored. The import has two known downgrades: `index.txt` cannot distinguish categories, so all records are imported as type `cert`; and records carry no original valid-from time, so `not_before` is set to the import time. If this is a problem, use `db import` to re-import specific certificates.
 

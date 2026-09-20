@@ -587,11 +587,25 @@ ca
 
 ### 兼容旧的 xcert.sh 目录
 
-当加上全局参数 `--legacy` 且 `-D` 指向由旧 `xcert.sh` 生成的 CA 目录时，工具会读取旧的文件结构与记录，以便继续签发新证书：
+当加上全局参数 `--legacy` 且 `-D` 指向由旧 [`xcert.sh`](https://gist.github.com/xireiki/acb4b35c49538ccfdb98c014747edc74) 生成的 CA 目录时，工具会读取旧的文件结构与记录，以便继续签发新证书：
 
 - 私钥：兼容旧版 OpenSSL 生成的 `EC PARAMETERS` + `EC PRIVATE KEY` 文件，以及 RSA 私钥。
 - 记录：若目录中存在 `serial` 或 `index.txt`，会在首次打开时读取 `serial` 以续接 `--sequential-serial` 的计数器，并把 `index.txt` 中的已签发/已吊销记录导入 `xcert.db`。
 - 该目录结构已弃用，读取时会输出 `WARN` 级别的弃用警告。
+
+#### 导入方法（xcert.sh）
+
+导入在首次打开数据库时自动完成，无需单独命令。在旧目录上执行任意命令并加上 `--legacy` 即可，例如：
+
+```sh
+xcert --legacy db list -D ./oldca
+```
+
+首次运行会在 `./oldca` 下创建 `xcert.db`，把 `serial` 写入 `meta.serial` 计数器、把 `index.txt` 中的记录写入 `certs` 表，并输出一条 `WARN` 级弃用警告。导入后记录已在 `xcert.db` 中，后续命令可去掉 `--legacy`：
+
+```sh
+xcert db list -D ./oldca
+```
 
 导入只发生一次（`certs` 表为空时），工具不会写回 `serial` 或 `index.txt`，新记录仍只写入 `xcert.db`。不加 `--legacy` 时，`serial` 与 `index.txt` 会被忽略。导入存在两个已知降级点：`index.txt` 无法区分类别，所有记录都按 `cert` 类型导入；记录没有原始生效时间，`not_before` 统一写为导入时刻。如果这会影响使用，可用 `db import` 重新补录具体证书。
 
