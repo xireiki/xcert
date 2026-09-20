@@ -47,17 +47,17 @@ func newInteCommand() *cobra.Command {
 
 func runInte(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir, certFile, keyFile string, sequentialSerial bool) error {
 	certPath := filepath.Join(dir, "InteCA.cer")
-	if exists(certPath) {
+	if pki.Exists(certPath) {
 		log.Warn("Intermediate certificate already exists\n")
 		return nil
 	}
 	if certFile == "" || keyFile == "" {
 		return fmt.Errorf("intermediate CA requires -c/--cert and -k/--key")
 	}
-	if !exists(certFile) {
+	if !pki.Exists(certFile) {
 		return fmt.Errorf("certificate not found: %s", certFile)
 	}
-	if !exists(keyFile) {
+	if !pki.Exists(keyFile) {
 		return fmt.Errorf("key not found: %s", keyFile)
 	}
 	for _, name := range []string{"newcerts", "crl", "certs"} {

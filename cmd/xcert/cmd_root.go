@@ -39,7 +39,7 @@ func newRootCommand() *cobra.Command {
 
 func runRoot(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir string) error {
 	certPath := filepath.Join(dir, "RootCA.cer")
-	if exists(certPath) {
+	if pki.Exists(certPath) {
 		log.Warn("Root certificate already exists\n")
 		return nil
 	}

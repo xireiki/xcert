@@ -1,8 +1,6 @@
 package main
 
 import (
-	"os"
-
 	"xcert/option"
 
 	"github.com/spf13/cobra"
@@ -24,11 +22,6 @@ func addCAFlags(cmd *cobra.Command, o *option.CAOptions, defaults option.CAOptio
 	f.StringVar(&o.Digest, "digest", defaults.Digest, "signature digest algorithm (sha256, sha384, sha512)")
 	f.BoolVar(&o.SubjectKeyID, "subject-key-id", defaults.SubjectKeyID, "include subject key identifier")
 	f.BoolVar(&o.AuthorityKeyID, "authority-key-id", defaults.AuthorityKeyID, "include authority key identifier")
-}
-
-func exists(path string) bool {
-	_, err := os.Stat(path)
-	return err == nil
 }
 
 func containsString(list []string, value string) bool {

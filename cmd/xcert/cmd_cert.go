@@ -130,7 +130,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		return err
 	}
 	fullchainPath := filepath.Join(domainDir, "fullchain.cer")
-	if exists(fullchainPath) {
+	if pki.Exists(fullchainPath) {
 		log.Warn("Certificate for domain name %s already exist\n", cn)
 		return nil
 	}
@@ -138,7 +138,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 	cerPath := filepath.Join(domainDir, cn+".cer")
 	var parentCert *x509.Certificate
 	var parentKey crypto.Signer
-	if !exists(cerPath) {
+	if !pki.Exists(cerPath) {
 		parentCert, err = pki.LoadCert(certFile)
 		if err != nil {
 			return err
@@ -174,7 +174,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		publicKey = keySigner.Public()
 	}
 
-	if !exists(cerPath) {
+	if !pki.Exists(cerPath) {
 		serial, err := nextSerial(st, sequentialSerial)
 		if err != nil {
 			return err
@@ -200,7 +200,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 			return err
 		}
 		fullchain := cerPEM
-		if exists(chainFile) {
+		if pki.Exists(chainFile) {
 			chainPEM, err := os.ReadFile(chainFile)
 			if err != nil {
 				return err
@@ -215,9 +215,9 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		}
 	}
 
-	done := exists(cerPath) && exists(fullchainPath)
+	done := pki.Exists(cerPath) && pki.Exists(fullchainPath)
 	if !externalCSR {
-		done = done && exists(keyPath)
+		done = done && pki.Exists(keyPath)
 	}
 	if done {
 		log.Info("Done.\n")
