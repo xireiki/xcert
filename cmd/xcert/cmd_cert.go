@@ -30,7 +30,6 @@ func newCertCommand() *cobra.Command {
 	)
 	cmd := &cobra.Command{
 		Use:           "cert",
-		Aliases:       []string{"sign"},
 		Short:         "Create Domain Name Certificate",
 		SilenceUsage:  true,
 		SilenceErrors: true,
