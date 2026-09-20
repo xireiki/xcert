@@ -1,7 +1,6 @@
 package store
 
 import (
-	"context"
 	"database/sql"
 	"fmt"
 	"math/big"
@@ -136,25 +135,14 @@ func (s *Store) NextCRLNumber() (*big.Int, error) {
 }
 
 func (s *Store) metaCounter(key string) (*big.Int, error) {
-	ctx := context.Background()
-	conn, err := s.db.Conn(ctx)
+	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, err
 	}
-	defer conn.Close()
-
-	if _, err := conn.ExecContext(ctx, "BEGIN IMMEDIATE"); err != nil {
-		return nil, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			conn.ExecContext(ctx, "ROLLBACK")
-		}
-	}()
+	defer tx.Rollback()
 
 	var current string
-	err = conn.QueryRowContext(ctx, `SELECT value FROM meta WHERE key = ?`, key).Scan(&current)
+	err = tx.QueryRow(`SELECT value FROM meta WHERE key = ?`, key).Scan(&current)
 	if err == sql.ErrNoRows {
 		current = "01"
 	} else if err != nil {
@@ -165,16 +153,15 @@ func (s *Store) metaCounter(key string) (*big.Int, error) {
 		n = big.NewInt(1)
 	}
 	next := new(big.Int).Add(n, big.NewInt(1))
-	if _, err := conn.ExecContext(ctx,
+	if _, err := tx.Exec(
 		`INSERT INTO meta(key, value) VALUES(?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
 		key, fmt.Sprintf("%02x", next),
 	); err != nil {
 		return nil, err
 	}
-	if _, err := conn.ExecContext(ctx, "COMMIT"); err != nil {
+	if err := tx.Commit(); err != nil {
 		return nil, err
 	}
-	committed = true
 	return n, nil
 }
 
