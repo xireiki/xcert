@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode"
 
 	"xcert/log"
 	"xcert/option"
@@ -57,7 +58,7 @@ func validateCommonName(cn string) error {
 	if cn == "" {
 		return fmt.Errorf("common name is empty")
 	}
-	if cn == "." || cn == ".." || cn != filepath.Base(cn) || strings.ContainsAny(cn, `/\`) || strings.ContainsRune(cn, 0) {
+	if cn == "." || cn == ".." || cn != filepath.Base(cn) || strings.ContainsAny(cn, `/\`) || strings.IndexFunc(cn, unicode.IsControl) >= 0 {
 		return fmt.Errorf("unsafe common name %q", cn)
 	}
 	return nil
