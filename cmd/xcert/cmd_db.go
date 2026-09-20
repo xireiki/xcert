@@ -200,6 +200,9 @@ func runSetStatus(dir, selector, status string, crlOptions *option.CRLOptions) e
 }
 
 func writeCRL(dir string, o *option.CRLOptions, st *store.Store) error {
+	if err := validateDays("--crl-days", o.Days); err != nil {
+		return err
+	}
 	caCert := o.CACert
 	if caCert == "" {
 		caCert = filepath.Join(dir, "InteCA.cer")

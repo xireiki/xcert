@@ -151,7 +151,7 @@ xcert <子命令> [参数]
 | `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa`。其他取值会报错 |
 | `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数，仅在 `--cipher rsa` 时生效，最小 2048 |
 | `-s`, `--subject` | `/C=CN/O=Test SSL/CN=Test SSL CA` | 证书主体信息 |
-| `--days` | `3650` | 证书有效期，单位为天 |
+| `--days` | `3650` | 证书有效期，单位为天，必须为正数 |
 | `-D`, `--dir` | `.` | 文件保存目录 |
 | `--key-usage` | `keyCertSign,cRLSign` | 密钥用法扩展，逗号分隔，多个值取并集 |
 | `--ext-key-usage` | 空 | 扩展密钥用法，逗号分隔 |
@@ -191,7 +191,7 @@ xcert <子命令> [参数]
 | `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa` |
 | `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数，最小 2048 |
 | `-s`, `--subject` | `/C=CN/O=Test SSL/CN=Test Inte CA` | 证书主体信息 |
-| `--days` | `1825` | 证书有效期，单位为天 |
+| `--days` | `1825` | 证书有效期，单位为天，必须为正数 |
 | `-D`, `--dir` | `.` | 文件保存目录 |
 | `-c`, `--cert` | 无，必填 | 签发中间证书的上级 CA 证书路径 |
 | `-k`, `--key` | 无，必填 | 签发中间证书的上级 CA 私钥路径 |
@@ -241,7 +241,7 @@ xcert <子命令> [参数]
 | `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa` |
 | `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数，最小 2048 |
 | `-s`, `--subject` | `/C=CN` | 证书主体信息 |
-| `--days` | `90` | 证书有效期，单位为天 |
+| `--days` | `90` | 证书有效期，单位为天，必须为正数 |
 | `-D`, `--dir` | `.` | CA 目录，用于定位数据库、CA 证书、CA 私钥与证书链 |
 | `-c`, `--cert` | `<dir>/InteCA.cer` | 签发证书所用的 CA 证书 |
 | `-k`, `--key` | `<dir>/InteCA.key` | 签发证书所用的 CA 私钥 |
@@ -351,7 +351,7 @@ xcert <子命令> [参数]
 | `--ca-cert` | `<dir>/InteCA.cer` | 用于签发 CRL 的 CA 证书 |
 | `--ca-key` | `<dir>/InteCA.key` | 用于签发 CRL 的 CA 私钥 |
 | `--crl` | `<dir>/crl/<CA 文件名>.crl` | CRL 输出路径 |
-| `--crl-days` | `30` | CRL 的 `nextUpdate` 相对于当前时间的天数 |
+| `--crl-days` | `30` | CRL 的 `nextUpdate` 相对于当前时间的天数，必须为正数 |
 
 `revoke` 会先将匹配记录的状态更新为 `R` 并记录吊销时间，然后重新生成 CRL；`unrevoke` 会先将状态恢复为 `V` 并清除吊销时间，然后重新生成 CRL。若 CRL 生成失败，命令会报错并回滚状态修改，保持数据库与 CRL 一致。
 

@@ -1,6 +1,8 @@
 package main
 
 import (
+	"fmt"
+
 	"xcert/option"
 
 	"github.com/spf13/cobra"
@@ -31,4 +33,11 @@ func containsString(list []string, value string) bool {
 		}
 	}
 	return false
+}
+
+func validateDays(name string, days int) error {
+	if days <= 0 {
+		return fmt.Errorf("%s must be positive", name)
+	}
+	return nil
 }

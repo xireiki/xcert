@@ -84,6 +84,9 @@ func resolveNames(name pkix.Name, domains []string) (pkix.Name, string, []string
 }
 
 func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, csrFile string, domains []string, sequentialSerial bool) error {
+	if err := validateDays("--days", keyOptions.Days); err != nil {
+		return err
+	}
 	if certFile == "" {
 		certFile = filepath.Join(dir, "InteCA.cer")
 	}
