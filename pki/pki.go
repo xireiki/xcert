@@ -130,6 +130,9 @@ func EnsureKey(path, cipher string, bits int) (crypto.Signer, error) {
 		if got := KeyCipher(key.Public()); got != cipher {
 			return nil, fmt.Errorf("existing key %s is %s, not %s", path, got, cipher)
 		}
+		if rsaKey, ok := key.(*rsa.PrivateKey); ok && rsaKey.N.BitLen() < 2048 {
+			return nil, fmt.Errorf("existing RSA key %s is %d bits, minimum is 2048", path, rsaKey.N.BitLen())
+		}
 		return key, nil
 	}
 	key, keyPEM, err := GenerateKey(cipher, bits)
