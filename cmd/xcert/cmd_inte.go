@@ -80,7 +80,7 @@ func runInte(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir, ce
 		return err
 	}
 	subject := pki.ParseSubject(keyOptions.Subject)
-	if err := pki.EnsureCSR(filepath.Join(dir, "InteCA.csr"), subject, keySigner); err != nil {
+	if err := pki.EnsureCSR(filepath.Join(dir, "InteCA.csr"), subject, nil, keySigner); err != nil {
 		return err
 	}
 	parentCert, err := pki.LoadCert(certFile)

@@ -151,7 +151,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		if err != nil {
 			return err
 		}
-		if err := pki.EnsureCSR(csrPath, name, keySigner); err != nil {
+		if err := pki.EnsureCSR(csrPath, name, dnsNames, keySigner); err != nil {
 			return err
 		}
 		publicKey = keySigner.Public()

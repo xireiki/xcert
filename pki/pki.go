@@ -171,11 +171,11 @@ func EncodeCert(der []byte) []byte {
 	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
 }
 
-func EnsureCSR(path string, subject pkix.Name, signer crypto.Signer) error {
+func EnsureCSR(path string, subject pkix.Name, dnsNames []string, signer crypto.Signer) error {
 	if Exists(path) {
 		return nil
 	}
-	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: subject}, signer)
+	der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: subject, DNSNames: dnsNames}, signer)
 	if err != nil {
 		return err
 	}
