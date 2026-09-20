@@ -116,7 +116,6 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		cipher = keyOptions.Cipher
 	}
 
-	log.Info("Refresh Database\n")
 	log.Info("Start generating certificate\n")
 
 	st, err := store.Open(filepath.Join(dir, store.FileName))

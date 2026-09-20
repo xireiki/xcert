@@ -71,7 +71,6 @@ func runInte(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir, ce
 		return err
 	}
 	defer st.Close()
-	log.Info("Refresh Database\n")
 	log.Info("Start generating certificate\n")
 
 	keyPath := filepath.Join(dir, "InteCA.key")
