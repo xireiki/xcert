@@ -4,6 +4,8 @@ import (
 	"database/sql"
 	"fmt"
 	"math/big"
+	"net/url"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -37,7 +39,12 @@ type RevokedEntry struct {
 }
 
 func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return nil, err
+	}
+	dsn := (&url.URL{Scheme: "file", Path: filepath.ToSlash(abs), RawQuery: "_txlock=immediate"}).String()
+	db, err := sql.Open("sqlite", dsn)
 	if err != nil {
 		return nil, err
 	}

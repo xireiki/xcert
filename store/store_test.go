@@ -62,6 +62,46 @@ func TestSequentialSerialConcurrent(t *testing.T) {
 	}
 }
 
+func TestSequentialSerialAcrossConnections(t *testing.T) {
+	path := filepath.Join(t.TempDir(), FileName)
+	const stores, each = 8, 10
+	var wg sync.WaitGroup
+	errs := make(chan error, stores)
+	seen := make(chan int64, stores*each)
+	for i := 0; i < stores; i++ {
+		s, err := Open(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer s.Close()
+		wg.Add(1)
+		go func(s *Store) {
+			defer wg.Done()
+			for j := 0; j < each; j++ {
+				serial, err := s.NextSequentialSerial()
+				if err != nil {
+					errs <- err
+					return
+				}
+				seen <- serial.Int64()
+			}
+		}(s)
+	}
+	wg.Wait()
+	close(errs)
+	close(seen)
+	for err := range errs {
+		t.Fatal(err)
+	}
+	counts := make(map[int64]int)
+	for serial := range seen {
+		counts[serial]++
+	}
+	if len(counts) != stores*each {
+		t.Fatalf("expected %d unique serials, got %d", stores*each, len(counts))
+	}
+}
+
 func TestRecords(t *testing.T) {
 	s := openTestStore(t)
 	now := time.Now()
