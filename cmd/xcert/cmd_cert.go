@@ -111,9 +111,11 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		if err != nil {
 			return err
 		}
-		csrDomains := domains
-		if len(csrDomains) == 0 {
-			csrDomains = csr.DNSNames
+		csrDomains := append([]string{}, domains...)
+		for _, domain := range csr.DNSNames {
+			if !containsString(csrDomains, domain) {
+				csrDomains = append(csrDomains, domain)
+			}
 		}
 		name, cn, dnsNames, err = resolveNames(csr.Subject, csrDomains)
 		if err != nil {
