@@ -92,7 +92,7 @@ func GenerateKey(cipher string, bits int) (crypto.Signer, []byte, error) {
 		}
 		return key, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), nil
 	default:
-		return nil, nil, fmt.Errorf("Unknown private key type: %s", cipher)
+		return nil, nil, fmt.Errorf("unsupported cipher %q, supported: ecc, rsa", cipher)
 	}
 }
 
