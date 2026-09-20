@@ -7,7 +7,7 @@
 ## 功能特性
 
 - 生成根 CA（`root`）、中间 CA（`inte`）、域名证书（`cert`）
-- 支持 ECC（prime256v1 / P-256）与 RSA（不小于 2048 位）私钥
+- 支持 ECC（prime256v1 / P-256）、RSA（不小于 2048 位）与 ed25519 私钥
 - CA 数据保存到每个 CA 目录下的 SQLite 数据库 `xcert.db`
 - 提供 `db` 子命令管理证书数据库
 - 支持吊销证书并生成 X.509 CRL
@@ -140,7 +140,7 @@ xcert <子命令> [参数]
 | `CN` | 通用名称（Common Name） |
 | `emailAddress` 或 `E` | 电子邮件地址 |
 
-`C`、`ST`、`L`、`O`、`OU` 可重复出现并会累积为多值；`CN` 与 `emailAddress` 每次出现都会覆盖之前的值，因此最终取最后一次出现的结果。空字段会被忽略。
+`C`、`ST`、`L`、`O`、`OU` 可重复出现并会累积为多值；`CN` 每次出现都会覆盖之前的值，`emailAddress` 可重复出现并累积为多值。空字段会被忽略。
 
 ## root：创建根证书
 
@@ -197,7 +197,7 @@ xcert <子命令> [参数]
 | `-k`, `--key` | 无，必填 | 签发中间证书的上级 CA 私钥路径 |
 | `--sequential-serial` | `false` | 使用数据库递增计数器作为序列号；默认使用随机序列号 |
 | `--key-usage` | `keyCertSign,cRLSign` | 密钥用法扩展 |
-| `--ext-key-usage` | `serverAuth,clientAuth` | 扩展密钥用法 |
+| `--ext-key-usage` | 空 | 扩展密钥用法 |
 | `--path-length` | `0` | CA 路径长度限制，`-1` 表示不设置 |
 | `--digest` | `sha512` | 签名摘要算法 |
 | `--subject-key-id` | `true` | 是否包含 SKI |
@@ -216,7 +216,7 @@ xcert <子命令> [参数]
 - 生成证书链 `chain.cer`，内容为 `InteCA.cer` 与上级 CA 证书的拼接。
 - 将中间证书记录写入数据库，类型为 `inte`，名称为 `InteCA`。
 - 证书 `NotAfter` 取请求天数与上级 CA 的 `NotAfter` 中的较小值，保证不超过签发者有效期。
-- 若上级 CA 不带 SKI，则使用其公钥的 SHA-1 摘要作为 AKI。
+- 若上级 CA 不带 SKI，则不附带 AKI。
 
 默认使用随机序列号；使用 `--sequential-serial` 时改为从数据库计数器读取并递增。
 
@@ -272,7 +272,7 @@ xcert <子命令> [参数]
 - 证书 `NotAfter` 取请求天数与签发 CA 的 `NotAfter` 中的较小值，保证不超过签发者有效期。
 - 若签发 CA 不带 SKI，则使用其公钥的 SHA-1 摘要作为 AKI。
 
-密钥用法依据密钥类型自动确定：ECDSA 私钥使用 `digitalSignature`；RSA 私钥使用 `digitalSignature,keyEncipherment`。扩展密钥用法为 `serverAuth,clientAuth`，`basicConstraints` 为 `CA:FALSE`。签名摘要算法固定为 SHA-256。
+密钥用法依据密钥类型自动确定：ECDSA 与 ed25519 私钥使用 `digitalSignature`；RSA 私钥使用 `digitalSignature,keyEncipherment`。扩展密钥用法为 `serverAuth,clientAuth`，`basicConstraints` 为 `CA:FALSE`。签名摘要算法固定为 SHA-256。
 
 ### 签署外部证书请求
 
@@ -306,7 +306,7 @@ xcert <子命令> [参数]
 | --- | --- |
 | `db list` | 列出数据库中的全部记录 |
 | `db show <serial\|name>` | 按序列号或名称显示一条记录 |
-| `db delete <serial\|name>` | 按序列号或名称删除一条记录 |
+| `db delete <serial\|name>` | 删除一条记录；已吊销记录需加 `--force`，删除后保留墓碑 |
 | `db revoke <serial\|name>` | 将记录状态标记为已吊销并重新生成 CRL |
 | `db unrevoke <serial\|name>` | 将记录状态恢复为有效并重新生成 CRL |
 
@@ -342,7 +342,17 @@ xcert <子命令> [参数]
 | `Created` | 记录创建时间 |
 | `Revoked` | 吊销时间，未吊销时为空 |
 
-### delete / revoke / unrevoke 参数
+### delete 参数
+
+在 `-D` / `--dir` 之外，还支持：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `--force` | `false` | 删除已吊销记录；删除后保留一条墓碑记录，使该序列号继续出现在 CRL 中 |
+
+`db delete` 删除数据库记录；对于域名证书（`cert`），会一并删除对应的 `<CN>.cer`、`<CN>.key`、`<CN>.csr` 与 `fullchain.cer`。已吊销（`R`）的记录默认拒绝删除，需加 `--force`；加 `--force` 后记录被软删除，`db list` 不再显示，但其序列号仍保留在 CRL 中。`root`、`inte` 记录只删除数据库行，不删除 CA 文件。
+
+### revoke / unrevoke 参数
 
 在 `-D` / `--dir` 之外，还支持以下参数：
 
@@ -356,11 +366,7 @@ xcert <子命令> [参数]
 
 `revoke` 会先将匹配记录的状态更新为 `R` 并记录吊销时间，然后重新生成 CRL；`unrevoke` 会先将状态恢复为 `V` 并清除吊销时间，然后重新生成 CRL。若 CRL 生成失败，命令会报错并回滚状态修改，保持数据库与 CRL 一致。用于签发 CRL 的 CA 证书必须为 CA 证书且允许 CRL 签名。
 
-CRL 使用 `X509 CRL` PEM 格式，CRL 编号来自数据库 `meta` 表中的独立递增计数器。CRL 内容包含数据库中所有状态为 `R` 的域名证书记录。
-
-### delete 行为
-
-`db delete` 删除数据库记录；对于域名证书（`cert`），会一并删除对应的 `<CN>.cer`、`<CN>.key`、`<CN>.csr` 与 `fullchain.cer`；若被删除的记录处于已吊销状态，还会重新生成 CRL。`root`、`inte` 记录只删除数据库行，不删除 CA 文件。
+CRL 使用 `X509 CRL` PEM 格式，CRL 编号来自数据库 `meta` 表中的独立递增计数器。CRL 内容包含数据库中所有状态为 `R` 的域名证书记录，包括已软删除的墓碑记录。
 
 ## 证书能力参数详解
 
@@ -409,15 +415,15 @@ CA 路径长度限制。取值 `-1` 表示不写入路径长度限制；`0` 表�
 
 ### --digest
 
-签名摘要算法，可选 `sha256`、`sha384`、`sha512`。会根据密钥类型自动选择对应算法（RSA 使用 RSASSA-PKCS1-v1_5，ECC 使用 ECDSA）。
+签名摘要算法，可选 `sha256`、`sha384`、`sha512`。会根据密钥类型自动选择对应算法（RSA 使用 RSASSA-PKCS1-v1_5，ECC 使用 ECDSA）；ed25519 忽略该参数，始终使用 Ed25519。
 
 ### --subject-key-id 与 --authority-key-id
 
 用于控制是否包含 SKI 与 AKI 扩展。
 
-标准库在生成 CA 证书时会强制加入 SKI，并在由上级 CA 签发时根据父证书的 SKI 自动派生 AKI。为支持关闭这两个扩展：
-
+- 当 `--subject-key-id=true`（默认）时，SKI 由标准库按 RFC 7093 方法一生成（对 `subjectPublicKey` 做 SHA-256 并截取 160 位）。
 - 当 `--subject-key-id=false` 时，工具改为手动编码 `basicConstraints` 扩展，并让标准库不将证书视为 CA 以跳过自动生成 SKI。生成的证书仍带有正确的 `CA:TRUE` 扩展，证书链可正常验证。
+- 当 `--authority-key-id=true`（默认）时，AKI 由标准库从父证书的 SKI 派生。
 - 当 `--authority-key-id=false` 时，工具在签发前清空父证书对象中的 SKI，使标准库无法派生出 AKI。
 
 ## 密钥与文件格式
@@ -481,6 +487,7 @@ ca
 | `key_path` | TEXT | 私钥路径 |
 | `created_at` | TEXT | 记录创建时间，RFC 3339 |
 | `revoked_at` | TEXT | 吊销时间，RFC 3339，未吊销为空 |
+| `deleted` | INTEGER | 是否已软删除；`1` 表示墓碑记录，`db list`/`db show` 不显示，但吊销信息仍保留在 CRL 中 |
 
 序列号默认使用 128 位随机数，不占用数据库计数器；使用 `--sequential-serial` 时读取 `serial` 计数器（初始为 `01`）并递增。`root` 始终使用随机序列号。CRL 编号使用独立的 `crl` 计数器。
 
