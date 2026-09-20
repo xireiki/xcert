@@ -233,7 +233,11 @@ func (s *Store) SetStatus(selector, status string) (Record, error) {
 	}
 	var revokedAt any
 	if status == "R" {
-		revokedAt = time.Now().UTC().Format(time.RFC3339)
+		timestamp := time.Now().UTC().Format(time.RFC3339)
+		revokedAt = timestamp
+		record.RevokedAt = sql.NullString{String: timestamp, Valid: true}
+	} else {
+		record.RevokedAt = sql.NullString{}
 	}
 	if _, err := s.db.Exec(`UPDATE certs SET status = ?, revoked_at = ? WHERE id = ?`, status, revokedAt, record.ID); err != nil {
 		return Record{}, err
