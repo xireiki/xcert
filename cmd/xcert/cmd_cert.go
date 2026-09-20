@@ -178,7 +178,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		cert, der, err := pki.Issue(publicKey, parentCert, parentKey, pki.IssueOptions{
 			Serial:         serial,
 			Subject:        name,
-			NotBefore:      now,
+			NotBefore:      now.Add(-time.Minute),
 			NotAfter:       pki.ValidUntil(parentCert, keyOptions.Days, now),
 			KeyUsage:       pki.LeafKeyUsage(publicKey),
 			ExtKeyUsage:    []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},

@@ -111,7 +111,7 @@ func runInte(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir, ce
 	cert, der, err := pki.Issue(keySigner.Public(), parentCert, parentKey, pki.IssueOptions{
 		Serial:         serial,
 		Subject:        subject,
-		NotBefore:      now,
+		NotBefore:      now.Add(-time.Minute),
 		NotAfter:       pki.ValidUntil(parentCert, keyOptions.Days, now),
 		KeyUsage:       usage,
 		ExtKeyUsage:    extUsage,

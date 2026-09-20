@@ -495,6 +495,7 @@ ca
 - RFC 6125：主机名始终通过 `subjectAltName` 表达，`CN` 与 `subjectAltName` 保持一致。
 - RFC 5480：ECDSA 证书的 `keyUsage` 不含 `keyEncipherment`。
 - CA/Browser Forum Baseline Requirements：服务器证书签名摘要使用 SHA-256；CA 证书包含 `keyCertSign`；RSA 密钥长度不小于 2048；序列号包含至少 64 位密码学安全随机数。
+- 生成的证书 `NotBefore` 相对当前时间回拨 1 分钟，避免客户端时钟偏差导致证书被视为尚未生效。
 
 ## 项目结构
 

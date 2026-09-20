@@ -71,7 +71,7 @@ func runRoot(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir str
 	cert, der, err := pki.IssueSelfSigned(key, pki.IssueOptions{
 		Serial:         serial,
 		Subject:        pki.ParseSubject(keyOptions.Subject),
-		NotBefore:      now,
+		NotBefore:      now.Add(-time.Minute),
 		NotAfter:       now.AddDate(0, 0, keyOptions.Days),
 		KeyUsage:       usage,
 		ExtKeyUsage:    extUsage,
