@@ -219,7 +219,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		if err := pki.WriteFile(cerPath, cerPEM, 0644); err != nil {
 			return err
 		}
-		if err := st.Record(serial, cert.Subject.String(), "cert", cn, cerPath, keyPath, now, cert.NotAfter); err != nil {
+		if err := st.Record(serial, cert.Subject.String(), "cert", cn, cerPath, keyPath, cert.NotBefore, cert.NotAfter); err != nil {
 			os.Remove(cerPath)
 			return err
 		}

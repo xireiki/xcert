@@ -96,7 +96,7 @@ func runRoot(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir str
 	if err := pki.WriteFile(certPath, pki.EncodeCert(der), 0644); err != nil {
 		return err
 	}
-	if err := st.Record(serial, cert.Subject.String(), "root", "RootCA", certPath, keyPath, now, cert.NotAfter); err != nil {
+	if err := st.Record(serial, cert.Subject.String(), "root", "RootCA", certPath, keyPath, cert.NotBefore, cert.NotAfter); err != nil {
 		os.Remove(certPath)
 		return err
 	}
