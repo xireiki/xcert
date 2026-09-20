@@ -7,13 +7,22 @@
 
 ## 构建与测试
 
-- 构建：`go build -o xcert .`
-- 测试：`go test ./...`
+- 构建：`make build` 或 `go build -o xcert ./cmd/xcert`
+- 测试：`make test` 或 `go test ./...`
+
+## 目录结构
+
+- `cmd/xcert/`：命令行入口，每个子命令一个 `cmd_*.go` 文件
+- `pki/`：密钥与证书操作
+- `store/`：SQLite 证书数据库
+- `option/`：命令行参数结构体
+- `log/`：日志等级与输出
+- 命令帮助由 cobra 依据 `Short` 与参数说明自动生成，不在代码中硬编码帮助文本
 
 ## 参数风格
 
 统一采用 GNU kebab-case 长选项风格：
 
 - CA 目录统一为 `-D` / `--dir`
-- 长选项使用连字符，例如 `--rsa-bits`、`--path-length`、`--digest`、`--random-serial`、`--crl-days`
+- 长选项使用连字符，例如 `--rsa-bits`、`--path-length`、`--digest`、`--sequential-serial`、`--crl-days`
 - 高频操作保留短选项，其余仅提供长选项

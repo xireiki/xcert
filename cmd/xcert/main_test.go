@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"xcert/store"
 )
 
 func TestChain(t *testing.T) {
@@ -58,17 +60,17 @@ func TestChain(t *testing.T) {
 		t.Fatalf("leaf NotAfter %s exceeds issuer NotAfter %s", leaf.NotAfter, inte.NotAfter)
 	}
 
-	st, err := openStore(filepath.Join(ca, dbFileName))
+	st, err := store.Open(filepath.Join(ca, store.FileName))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer st.close()
-	var count int
-	if err := st.db.QueryRow(`SELECT count(*) FROM certs`).Scan(&count); err != nil {
+	defer st.Close()
+	records, err := st.List()
+	if err != nil {
 		t.Fatal(err)
 	}
-	if count != 3 {
-		t.Fatalf("expected 3 certs recorded, got %d", count)
+	if len(records) != 3 {
+		t.Fatalf("expected 3 certs recorded, got %d", len(records))
 	}
 }
 
@@ -133,6 +135,15 @@ func TestNoSubjectKeyID(t *testing.T) {
 	}
 }
 
+func exec(t *testing.T, args ...string) {
+	t.Helper()
+	cmd := newCLI()
+	cmd.SetArgs(args)
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func loadCRL(t *testing.T, path string) *x509.RevocationList {
 	t.Helper()
 	block, _ := pem.Decode(mustRead(t, path))
@@ -153,15 +164,6 @@ func mustRead(t *testing.T, path string) []byte {
 		t.Fatal(err)
 	}
 	return data
-}
-
-func exec(t *testing.T, args ...string) {
-	t.Helper()
-	cmd := newRootCommand()
-	cmd.SetArgs(args)
-	if err := cmd.Execute(); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func addPEM(t *testing.T, pool *x509.CertPool, path string) {

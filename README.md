@@ -1,34 +1,47 @@
 # xcert
 
-`xcert` 是一个用 Go 实现的证书颁发工具，用于生成自签根证书、中间证书和域名证书，并提供基于 SQLite 的证书数据库管理功能（列出、查询、删除、吊销、解除吊销、生成 CRL）。
+用 Go 实现的 X.509 证书颁发工具，用于生成自签根证书、中间证书和域名证书，并提供基于 SQLite 的证书数据库管理功能（列出、查询、删除、吊销、解除吊销、生成 CRL）。
 
-本工具完全使用 Go 标准库的 `crypto` 系列包完成密钥与证书操作，不再依赖外部 `openssl` 命令。
+密钥与证书操作全部使用 Go 标准库完成，不依赖外部命令。
 
 ## 功能特性
 
 - 生成根 CA（`root`）、中间 CA（`inte`）、域名证书（`cert` / `sign`）
-- 支持 ECC（prime256v1 / P-256）与 RSA 私钥
+- 支持 ECC（prime256v1 / P-256）与 RSA（不小于 2048 位）私钥
 - CA 数据保存到每个 CA 目录下的 SQLite 数据库 `xcert.db`
 - 提供 `db` 子命令管理证书数据库
-- 支持吊销证书并按需生成 X.509 CRL
-- 可自定义密钥用法、扩展密钥用法、CA 路径长度、签名摘要算法等证书能力参数
-- 默认使用随机序列号，可用 `--sequential-serial` 切换为基于数据库计数器递增的序列号
+- 支持吊销证书并生成 X.509 CRL
+- 可自定义密钥用法、扩展密钥用法、CA 路径长度、签名摘要算法、SKI/AKI 开关
+- 默认使用随机序列号，也可切换为数据库递增序列号
+- 分级日志与彩色输出
 
 ## 构建与安装
 
 要求 Go 1.27 或更高版本。
 
 ```sh
-go build -o xcert .
+make build
 ```
 
-将生成的 `xcert` 可执行文件放入 `PATH` 即可使用。
+或直接使用 Go 命令：
+
+```sh
+go build -o xcert ./cmd/xcert
+```
+
+安装到 `GOPATH/bin`：
+
+```sh
+make install
+```
 
 运行测试：
 
 ```sh
-go test ./...
+make test
 ```
+
+可用的 Makefile 目标：`all`（默认）、`build`、`race`、`test`、`vet`、`fmt`、`install`、`clean`。
 
 ## 快速开始
 
@@ -40,7 +53,7 @@ xcert inte -D ./ca -c ./ca/RootCA.cer -k ./ca/RootCA.key
 xcert cert -D ./ca -d example.com -d www.example.com
 ```
 
-生成结果位于 `./ca` 与 `./ca/certs/example.com_ecc` 下，证书数据库为 `./ca/xcert.db`。
+生成结果位于 `./ca`，证书数据库为 `./ca/xcert.db`。
 
 查看已签发的证书：
 
@@ -61,8 +74,6 @@ xcert db revoke example.com -D ./ca
 xcert <子命令> [参数]
 ```
 
-子命令：
-
 | 子命令 | 说明 |
 | --- | --- |
 | `root` | 创建根证书 |
@@ -74,9 +85,17 @@ xcert <子命令> [参数]
 
 直接执行 `xcert` 不带子命令时会输出错误并提示查看帮助；未知子命令同样会报错并提示查看帮助。
 
-`xcert help` 显示总帮助，`xcert <子命令> --help` 显示对应子命令的帮助。
+`xcert help` 显示总帮助，`xcert <子命令> --help` 显示对应子命令的完整参数与默认值。帮助内容由 cobra 依据子命令说明与参数定义生成。
 
 ## 全局说明
+
+### 全局参数
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `--log-level` | `info` | 日志等级，可选 `trace`、`debug`、`info`、`warn`、`error`、`fatal`、`panic`，也可写作 `warning` |
+
+该参数可放在任意子命令之前或之后。
 
 ### 帮助行为
 
@@ -84,12 +103,25 @@ xcert <子命令> [参数]
 - `cert` 与 `sign` 子命令不带参数执行时会因为缺少可用的通用名称而报错。
 - `db` 子命令不带参数执行时显示其帮助信息。
 
-### 颜色输出
+### 日志
 
-当环境变量 `TERM` 的值为 `xterm-256color` 时，日志级别会带颜色：`INFO` 为绿色，`WARN` 为黄色，`ERRO` 为红色。其他情况下输出纯文本。
+日志等级由低到高为 `panic`、`fatal`、`error`、`warn`、`info`、`debug`、`trace`。默认等级为 `info`，即只输出不低于 `info` 的日志；设置为更高等级（如 `debug` 或 `trace`）会输出更详细的日志，设置为更低等级（如 `error`）会抑制 `info` 与 `warn`。
 
-- `INFO` 与 `WARN` 输出到标准输出
-- `ERRO` 输出到标准错误
+日志统一输出到标准错误。日志标签固定为等级的大写英文：
+
+| 等级 | 标签 |
+| --- | --- |
+| `panic` | `PANIC` |
+| `fatal` | `FATAL` |
+| `error` | `ERROR` |
+| `warn` | `WARN` |
+| `info` | `INFO` |
+| `debug` | `DEBUG` |
+| `trace` | `TRACE` |
+
+当环境变量 `TERM` 的值为 `xterm-256color` 时标签带颜色：`ERROR`、`FATAL`、`PANIC` 为红色，`WARN` 为黄色，`INFO` 为青色，`DEBUG`、`TRACE` 为白色。其他情况下输出纯文本。
+
+命令产生的数据（如 `db list`、`db show` 的结果）输出到标准输出，与日志分离，便于重定向。
 
 ### 退出码
 
@@ -98,13 +130,7 @@ xcert <子命令> [参数]
 
 ### 主体信息格式
 
-`-s` / `--subject` 使用 OpenSSL 风格的主体字符串，以 `/` 分隔各字段，例如：
-
-```
-/C=CN/O=Test SSL/CN=Test SSL CA
-```
-
-支持的字段键（大小写不敏感）：
+`-s` / `--subject` 使用以斜杠分隔、形如 `/C=CN/O=Test SSL/CN=Test SSL CA` 的主体字符串。支持的字段键（大小写不敏感）：
 
 | 键 | 含义 |
 | --- | --- |
@@ -116,7 +142,7 @@ xcert <子命令> [参数]
 | `CN` | 通用名称（Common Name） |
 | `emailAddress` 或 `E` | 电子邮件地址 |
 
-`C`、`ST`、`L`、`O`、`OU` 可重复出现并会累积为多值；`CN` 与 `emailAddress` 每次出现都会覆盖之前的值，因此最终取最后一次出现的结果。空字段（例如字符串中连续的 `//`）会被忽略。
+`C`、`ST`、`L`、`O`、`OU` 可重复出现并会累积为多值；`CN` 与 `emailAddress` 每次出现都会覆盖之前的值，因此最终取最后一次出现的结果。空字段会被忽略。
 
 ## root：创建根证书
 
@@ -139,14 +165,14 @@ xcert <子命令> [参数]
 
 ### 行为
 
-- 若目标目录下已存在 `RootCA.cer`，输出 `RootCA.cer` 已存在的警告并直接返回，不覆盖。
+- 若目标目录下已存在 `RootCA.cer`，输出已存在的警告并直接返回，不覆盖。
 - 创建目录及 `<dir>/newcerts`、`<dir>/crl`。
 - 若 `<dir>/RootCA.key` 不存在，则按 `--cipher` 生成私钥。
 - 生成自签根证书 `RootCA.cer`，签名摘要算法由 `--digest` 决定。
 - 将根证书记录写入 `<dir>/xcert.db`，类型为 `root`，名称为 `RootCA`。
 - 根证书使用随机序列号（128 位）。
 
-根证书默认包含 `keyUsage`（`keyCertSign,cRLSign`）与 `basicConstraints`（`CA:TRUE`），并默认包含 SKI。签名摘要算法由 `--digest` 决定。
+根证书默认包含 `keyUsage`（`keyCertSign,cRLSign`）与 `basicConstraints`（`CA:TRUE`），并默认包含 SKI。
 
 ### 输出文件
 
@@ -165,7 +191,7 @@ xcert <子命令> [参数]
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa` |
-| `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数 |
+| `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数，最小 2048 |
 | `-s`, `--subject` | `/C=CN/O=Test SSL/CN=Test Inte CA` | 证书主体信息 |
 | `--days` | `1825` | 证书有效期，单位为天 |
 | `-D`, `--dir` | `.` | 文件保存目录 |
@@ -216,7 +242,7 @@ xcert <子命令> [参数]
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa` |
-| `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数 |
+| `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数，最小 2048 |
 | `-s`, `--subject` | `/C=CN` | 证书主体信息 |
 | `--days` | `90` | 证书有效期，单位为天 |
 | `-D`, `--dir` | `.` | CA 目录，用于定位数据库、CA 证书、CA 私钥与证书链 |
@@ -243,12 +269,12 @@ xcert <子命令> [参数]
 - 若 `<CN>.key` 不存在，则按 `--cipher` 生成私钥。
 - 若 `<CN>.csr` 不存在，则生成证书请求。
 - 使用 CA 证书与私钥签发 `<CN>.cer`。
-- 生成 `<CN> 的完整证书链 fullchain.cer`，内容为 `<CN>.cer` 与 `--chain` 指定文件内容的拼接。
+- 生成 `<CN>` 的完整证书链 `fullchain.cer`，内容为 `<CN>.cer` 与 `--chain` 指定文件内容的拼接。
 - 将域名证书记录写入数据库，类型为 `cert`，名称为 `CN`。
 - 证书 `NotAfter` 取请求天数与签发 CA 的 `NotAfter` 中的较小值，保证不超过签发者有效期。
 - 若签发 CA 不带 SKI，则使用其公钥的 SHA-1 摘要作为 AKI。
 
-密钥用法依据密钥类型自动确定：ECDSA 私钥使用 `digitalSignature`；RSA 私钥使用 `digitalSignature,keyEncipherment`。扩展密钥用法为 `serverAuth,clientAuth`，`basicConstraints` 为 `CA:FALSE`。签名摘要算法固定为 SHA-256，符合 CA/Browser Forum Baseline Requirements 对服务器证书的要求。
+密钥用法依据密钥类型自动确定：ECDSA 私钥使用 `digitalSignature`；RSA 私钥使用 `digitalSignature,keyEncipherment`。扩展密钥用法为 `serverAuth,clientAuth`，`basicConstraints` 为 `CA:FALSE`。签名摘要算法固定为 SHA-256。
 
 ### 输出文件
 
@@ -379,9 +405,9 @@ CA 路径长度限制。取值 `-1` 表示不写入路径长度限制；`0` 表�
 
 用于控制是否包含 SKI 与 AKI 扩展。
 
-Go 标准库在生成 CA 证书时会强制加入 SKI，并在由上级 CA 签发时根据父证书的 SKI 自动派生 AKI。为支持关闭这两个扩展：
+标准库在生成 CA 证书时会强制加入 SKI，并在由上级 CA 签发时根据父证书的 SKI 自动派生 AKI。为支持关闭这两个扩展：
 
-- 当 `--subject-key-id=false` 时，工具改为手动编码 `basicConstraints` 扩展，并令标准库不将证书视为 CA 以跳过自动生成 SKI。生成的证书仍带有正确的 `CA:TRUE` 扩展，证书链可正常验证。
+- 当 `--subject-key-id=false` 时，工具改为手动编码 `basicConstraints` 扩展，并让标准库不将证书视为 CA 以跳过自动生成 SKI。生成的证书仍带有正确的 `CA:TRUE` 扩展，证书链可正常验证。
 - 当 `--authority-key-id=false` 时，工具在签发前清空父证书对象中的 SKI，使标准库无法派生出 AKI。
 
 ## 密钥与文件格式
@@ -447,16 +473,6 @@ ca
 
 序列号默认使用 128 位随机数，不占用数据库计数器；使用 `--sequential-serial` 时读取 `serial` 计数器（初始为 `01`）并递增。`root` 始终使用随机序列号。CRL 编号使用独立的 `crl` 计数器。
 
-## 与旧版 shell 脚本的差异
-
-- 不再调用外部 `openssl` 命令，全部使用 Go 标准库实现。
-- 不再生成 `index.txt` 与 `serial` 文件，相关数据改为存放于 `xcert.db`。
-- 新增 `db` 子命令与 CRL 生成能力。
-- 新增证书能力参数。
-- `cert` 命令的 CA 证书、私钥与证书链默认路径会随 `-D` / `--dir` 一起变化。
-- 参数统一为 GNU kebab-case 风格：CA 目录统一为 `-D` / `--dir`；`-o` / `--output`、`--subj`、`--rsa-bit-number`、`--pathlen`、`--md`、CRL 的 `--days` 分别更名为 `-D` / `--dir`、`--subject`、`--rsa-bits`、`--path-length`、`--digest`、`--crl-days`。
-- 序列号策略调整：默认使用随机序列号，`-R` / `--random-serial` 替换为 `--sequential-serial`（反向语义，用于启用递增计数器）。
-
 ## 协议符合性
 
 证书生成逻辑依据以下规范设计：
@@ -465,6 +481,21 @@ ca
 - RFC 6125：主机名始终通过 `subjectAltName` 表达，`CN` 与 `subjectAltName` 保持一致。
 - RFC 5480：ECDSA 证书的 `keyUsage` 不含 `keyEncipherment`。
 - CA/Browser Forum Baseline Requirements：服务器证书签名摘要使用 SHA-256；CA 证书包含 `keyCertSign`；RSA 密钥长度不小于 2048；序列号包含至少 64 位密码学安全随机数。
+
+## 项目结构
+
+```
+.
+├── cmd/xcert/        命令行入口，每个子命令一个 cmd_*.go 文件
+├── log/              日志等级与输出
+├── option/           命令行参数结构体
+├── pki/              密钥与证书操作
+├── store/            SQLite 证书数据库
+├── Makefile
+├── go.mod
+├── LICENSE
+└── README.md
+```
 
 ## 许可证
 

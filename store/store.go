@@ -1,4 +1,4 @@
-package main
+package store
 
 import (
 	"database/sql"
@@ -10,13 +10,13 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const dbFileName = "xcert.db"
+const FileName = "xcert.db"
 
-type store struct {
+type Store struct {
 	db *sql.DB
 }
 
-type certRecord struct {
+type Record struct {
 	ID        int64
 	Serial    string
 	Subject   string
@@ -31,17 +31,17 @@ type certRecord struct {
 	RevokedAt sql.NullString
 }
 
-type revokedEntry struct {
+type RevokedEntry struct {
 	Serial *big.Int
 	Time   time.Time
 }
 
-func openStore(path string) (*store, error) {
+func Open(path string) (*Store, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, err
 	}
-	s := &store{db: db}
+	s := &Store{db: db}
 	if err := s.init(); err != nil {
 		db.Close()
 		return nil, err
@@ -49,7 +49,7 @@ func openStore(path string) (*store, error) {
 	return s, nil
 }
 
-func (s *store) init() error {
+func (s *Store) init() error {
 	_, err := s.db.Exec(`
 CREATE TABLE IF NOT EXISTS meta (
 	key   TEXT PRIMARY KEY,
@@ -82,7 +82,7 @@ CREATE INDEX IF NOT EXISTS idx_certs_name ON certs(name);
 	return err
 }
 
-func (s *store) ensureColumn(table, column, typ string) error {
+func (s *Store) ensureColumn(table, column, typ string) error {
 	rows, err := s.db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
 		return err
@@ -107,26 +107,19 @@ func (s *store) ensureColumn(table, column, typ string) error {
 	return err
 }
 
-func (s *store) close() error {
+func (s *Store) Close() error {
 	return s.db.Close()
 }
 
-func (s *store) nextSerial(sequential bool) (*big.Int, error) {
-	if !sequential {
-		return randomSerial()
-	}
-	current, err := s.metaCounter("serial")
-	if err != nil {
-		return nil, err
-	}
-	return current, nil
+func (s *Store) NextSequentialSerial() (*big.Int, error) {
+	return s.metaCounter("serial")
 }
 
-func (s *store) nextCRLNumber() (*big.Int, error) {
+func (s *Store) NextCRLNumber() (*big.Int, error) {
 	return s.metaCounter("crl")
 }
 
-func (s *store) metaCounter(key string) (*big.Int, error) {
+func (s *Store) metaCounter(key string) (*big.Int, error) {
 	var current string
 	err := s.db.QueryRow(`SELECT value FROM meta WHERE key = ?`, key).Scan(&current)
 	if err == sql.ErrNoRows {
@@ -148,7 +141,7 @@ func (s *store) metaCounter(key string) (*big.Int, error) {
 	return n, nil
 }
 
-func (s *store) record(serial *big.Int, subject, certType, name, certPath, keyPath string, notBefore, notAfter time.Time) error {
+func (s *Store) Record(serial *big.Int, subject, certType, name, certPath, keyPath string, notBefore, notAfter time.Time) error {
 	_, err := s.db.Exec(
 		`INSERT OR REPLACE INTO certs(serial, subject, type, name, status, not_before, not_after, cert_path, key_path, created_at)
 		 VALUES(?, ?, ?, ?, 'V', ?, ?, ?, ?, ?)`,
@@ -161,11 +154,11 @@ func (s *store) record(serial *big.Int, subject, certType, name, certPath, keyPa
 
 const recordColumns = `id, serial, subject, type, name, status, COALESCE(not_before, ''), COALESCE(not_after, ''), COALESCE(cert_path, ''), COALESCE(key_path, ''), created_at, revoked_at`
 
-func scanRecords(rows *sql.Rows) ([]certRecord, error) {
+func scanRecords(rows *sql.Rows) ([]Record, error) {
 	defer rows.Close()
-	var out []certRecord
+	var out []Record
 	for rows.Next() {
-		var r certRecord
+		var r Record
 		if err := rows.Scan(&r.ID, &r.Serial, &r.Subject, &r.Type, &r.Name, &r.Status,
 			&r.NotBefore, &r.NotAfter, &r.CertPath, &r.KeyPath, &r.CreatedAt, &r.RevokedAt); err != nil {
 			return nil, err
@@ -175,7 +168,7 @@ func scanRecords(rows *sql.Rows) ([]certRecord, error) {
 	return out, rows.Err()
 }
 
-func (s *store) list() ([]certRecord, error) {
+func (s *Store) List() ([]Record, error) {
 	rows, err := s.db.Query(`SELECT ` + recordColumns + ` FROM certs ORDER BY id`)
 	if err != nil {
 		return nil, err
@@ -183,7 +176,7 @@ func (s *store) list() ([]certRecord, error) {
 	return scanRecords(rows)
 }
 
-func (s *store) find(selector string) ([]certRecord, error) {
+func (s *Store) Find(selector string) ([]Record, error) {
 	rows, err := s.db.Query(
 		`SELECT `+recordColumns+` FROM certs WHERE lower(serial) = lower(?) OR name = ? ORDER BY id`,
 		selector, selector,
@@ -194,55 +187,55 @@ func (s *store) find(selector string) ([]certRecord, error) {
 	return scanRecords(rows)
 }
 
-func (s *store) resolve(selector string) (certRecord, error) {
-	recs, err := s.find(selector)
+func (s *Store) Resolve(selector string) (Record, error) {
+	records, err := s.Find(selector)
 	if err != nil {
-		return certRecord{}, err
+		return Record{}, err
 	}
-	switch len(recs) {
+	switch len(records) {
 	case 0:
-		return certRecord{}, fmt.Errorf("no certificate found for %q", selector)
+		return Record{}, fmt.Errorf("no certificate found for %q", selector)
 	case 1:
-		return recs[0], nil
+		return records[0], nil
 	default:
-		return certRecord{}, fmt.Errorf("%q is ambiguous, use the serial number", selector)
+		return Record{}, fmt.Errorf("%q is ambiguous, use the serial number", selector)
 	}
 }
 
-func (s *store) setStatus(selector, status string) (certRecord, error) {
-	rec, err := s.resolve(selector)
+func (s *Store) SetStatus(selector, status string) (Record, error) {
+	record, err := s.Resolve(selector)
 	if err != nil {
-		return certRecord{}, err
+		return Record{}, err
 	}
 	var revokedAt any
 	if status == "R" {
 		revokedAt = time.Now().UTC().Format(time.RFC3339)
 	}
-	if _, err := s.db.Exec(`UPDATE certs SET status = ?, revoked_at = ? WHERE id = ?`, status, revokedAt, rec.ID); err != nil {
-		return certRecord{}, err
+	if _, err := s.db.Exec(`UPDATE certs SET status = ?, revoked_at = ? WHERE id = ?`, status, revokedAt, record.ID); err != nil {
+		return Record{}, err
 	}
-	rec.Status = status
-	return rec, nil
+	record.Status = status
+	return record, nil
 }
 
-func (s *store) delete(selector string) (certRecord, error) {
-	rec, err := s.resolve(selector)
+func (s *Store) Delete(selector string) (Record, error) {
+	record, err := s.Resolve(selector)
 	if err != nil {
-		return certRecord{}, err
+		return Record{}, err
 	}
-	if _, err := s.db.Exec(`DELETE FROM certs WHERE id = ?`, rec.ID); err != nil {
-		return certRecord{}, err
+	if _, err := s.db.Exec(`DELETE FROM certs WHERE id = ?`, record.ID); err != nil {
+		return Record{}, err
 	}
-	return rec, nil
+	return record, nil
 }
 
-func (s *store) revoked() ([]revokedEntry, error) {
+func (s *Store) Revoked() ([]RevokedEntry, error) {
 	rows, err := s.db.Query(`SELECT serial, revoked_at FROM certs WHERE status = 'R' ORDER BY id`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []revokedEntry
+	var out []RevokedEntry
 	for rows.Next() {
 		var serial string
 		var revokedAt sql.NullString
@@ -253,7 +246,7 @@ func (s *store) revoked() ([]revokedEntry, error) {
 		if !ok {
 			continue
 		}
-		entry := revokedEntry{Serial: n, Time: time.Now()}
+		entry := RevokedEntry{Serial: n, Time: time.Now()}
 		if revokedAt.Valid {
 			if t, err := time.Parse(time.RFC3339, revokedAt.String); err == nil {
 				entry.Time = t
