@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/xireiki/xcert/store"
+	pkcs12 "software.sslmate.com/src/go-pkcs12"
 )
 
 func TestChain(t *testing.T) {
@@ -214,13 +215,68 @@ func TestInfo(t *testing.T) {
 	}
 }
 
-func exec(t *testing.T, args ...string) {
-	t.Helper()
-	cmd := newCLI()
-	cmd.SetArgs(args)
-	if err := cmd.Execute(); err != nil {
+func TestCodeSigning(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca")
+	exec(t, "root", "-D", ca)
+	exec(t, "inte", "-D", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"))
+	exec(t, "cert", "-D", ca, "-d", "sign.test", "--code-signing", "--pfx-password", "secret")
+
+	dir := filepath.Join(ca, "certs", "sign.test_ecc")
+	block, _ := pem.Decode(mustRead(t, filepath.Join(dir, "sign.test.cer")))
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
 		t.Fatal(err)
 	}
+	if len(cert.ExtKeyUsage) != 1 || cert.ExtKeyUsage[0] != x509.ExtKeyUsageCodeSigning {
+		t.Fatalf("expected only codeSigning, got %v", cert.ExtKeyUsage)
+	}
+	if cert.KeyUsage != x509.KeyUsageDigitalSignature {
+		t.Fatalf("expected digitalSignature only, got %v", cert.KeyUsage)
+	}
+	if _, err := os.Stat(filepath.Join(dir, "fullchain.cer")); !os.IsNotExist(err) {
+		t.Fatal("expected no fullchain.cer for a code signing certificate")
+	}
+
+	pfxData := mustRead(t, filepath.Join(dir, "sign.test.pfx"))
+	key, pfxCert, caCerts, err := pkcs12.DecodeChain(pfxData, "secret")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if key == nil || pfxCert.Subject.CommonName != "sign.test" {
+		t.Fatal("pfx does not contain the expected key and certificate")
+	}
+	if len(caCerts) != 2 {
+		t.Fatalf("expected 2 CA certificates in the pfx, got %d", len(caCerts))
+	}
+	if _, _, _, err := pkcs12.DecodeChain(pfxData, "wrong"); err == nil {
+		t.Fatal("expected a wrong pfx password to fail")
+	}
+
+	if err := execErr("cert", "-D", ca, "-d", "both.test", "--code-signing", "--ext-key-usage", "serverAuth"); err == nil {
+		t.Fatal("expected --code-signing and --ext-key-usage to be rejected together")
+	}
+}
+
+func TestCodeSigningIssuerRestriction(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca")
+	exec(t, "root", "-D", ca)
+	exec(t, "inte", "-D", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"), "--ext-key-usage", "serverAuth")
+	if err := execErr("cert", "-D", ca, "-d", "sign.test", "--code-signing"); err == nil {
+		t.Fatal("expected the restricted issuer to reject code signing")
+	}
+}
+
+func exec(t *testing.T, args ...string) {
+	t.Helper()
+	if err := execErr(args...); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func execErr(args ...string) error {
+	cmd := newCLI()
+	cmd.SetArgs(args)
+	return cmd.Execute()
 }
 
 func loadCRL(t *testing.T, path string) *x509.RevocationList {

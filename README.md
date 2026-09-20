@@ -251,12 +251,14 @@ xcert <子命令> [参数]
 | `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc`、`rsa` 或 `ed25519` |
 | `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数，最小 2048 |
 | `-s`, `--subject` | `/C=CN` | 证书主体信息 |
-| `--days` | `90` | 证书有效期，单位为天，必须为正数 |
+| `--days` | `90` | 证书有效期，单位为天，必须为正数；`--code-signing` 且未显式指定时默认 `365` |
 | `-D`, `--dir` | `.` | CA 目录，用于定位数据库、CA 证书、CA 私钥与证书链 |
 | `-c`, `--cert` | `<dir>/InteCA.cer` | 签发证书所用的 CA 证书 |
 | `-k`, `--key` | `<dir>/InteCA.key` | 签发证书所用的 CA 私钥 |
-| `--chain` | `<dir>/chain.cer` | 用于拼接 `fullchain.cer` 的证书链 |
+| `--chain` | `<dir>/chain.cer` | 用于拼接 `fullchain.cer`（普通证书）或 `.pfx`（代码签名证书）的证书链 |
 | `--ext-key-usage` | `serverAuth,clientAuth` | 扩展密钥用法，逗号分隔；为空则不写入该扩展 |
+| `--code-signing` | `false` | 生成 Windows 代码签名证书；启用时扩展密钥用法固定为 `codeSigning`，且与 `--ext-key-usage` 互斥 |
+| `--pfx-password` | 空 | 生成的 `.pfx` 文件密码，仅 `--code-signing` 时使用 |
 | `-d`, `--domain` | 无 | 域名，可重复指定 |
 | `--csr` | 无 | 签署外部证书请求，使用请求中的公钥与主体，不再生成私钥与请求 |
 | `--sequential-serial` | `false` | 使用数据库递增计数器作为序列号；默认使用随机序列号 |
@@ -273,17 +275,27 @@ xcert <子命令> [参数]
 ### 行为
 
 - 计算通用名称 `CN`，确定输出目录 `<dir>/certs/<CN>_<cipher>`。
-- 若该目录下已存在 `fullchain.cer`，输出已存在的警告并直接返回。
+- 若目标产物已存在（普通证书为 `fullchain.cer`，代码签名证书为 `<CN>.pfx`），输出已存在的警告并直接返回。
 - 若 `<CN>.key` 不存在，则按 `--cipher` 生成私钥；已存在的私钥类型与 `--cipher` 不一致时报错。
 - 若 `<CN>.csr` 不存在，则生成证书请求，其中包含与证书一致的 `subjectAltName`；已存在的证书请求与当前主体或 `subjectAltName` 不一致时会重新生成。
 - 使用 CA 证书与私钥签发 `<CN>.cer`。
 - 用于签发的 CA 证书必须为 CA 证书且允许证书签名，否则报错。
-- 生成 `<CN>` 的完整证书链 `fullchain.cer`，内容为 `<CN>.cer` 与 `--chain` 指定文件内容的拼接；若 `<CN>.cer` 已存在而 `fullchain.cer` 缺失，会直接重建。
+- 普通证书生成 `<CN>` 的完整证书链 `fullchain.cer`，内容为 `<CN>.cer` 与 `--chain` 指定文件内容的拼接；若 `<CN>.cer` 已存在而 `fullchain.cer` 缺失，会直接重建。代码签名证书改为生成 `<CN>.pfx`（见下）。
 - 将域名证书记录写入数据库，类型为 `cert`，名称为 `CN`。
 - 证书 `NotAfter` 取请求天数与签发 CA 的 `NotAfter` 中的较小值，保证不超过签发者有效期。
 - 若签发 CA 不带 SKI，则不附带 AKI。
 
 密钥用法依据密钥类型自动确定：ECDSA 与 ed25519 私钥使用 `digitalSignature`；RSA 私钥使用 `digitalSignature,keyEncipherment`。扩展密钥用法由 `--ext-key-usage` 决定，默认为 `serverAuth,clientAuth`，`basicConstraints` 为 `CA:FALSE`。签名摘要算法固定为 SHA-256。
+
+### 代码签名证书
+
+`cert --code-signing` 生成用于签名 Windows 程序的叶证书：
+
+- 扩展密钥用法固定为 `codeSigning`（1.3.6.1.5.5.7.3.3），密钥用法固定为 `digitalSignature`。
+- 默认有效期改为 365 天；显式指定 `--days` 时以指定值为准。
+- 与 `--ext-key-usage` 互斥，同时指定会报错；也不能与 `--csr` 一起使用。
+- 仅用于签发叶证书；签发前会校验签发 CA 的扩展密钥用法：CA 未设置 EKU，或包含 `codeSigning` / `any` 时才允许，否则报错。
+- 不生成 `fullchain.cer`，改为生成 PKCS#12 文件 `<CN>.pfx`，其中包含叶证书、对应私钥与 `--chain` 中的 CA 证书链，密码由 `--pfx-password` 指定（默认空密码）。PFX 使用 PBES2 + PBKDF2-HMAC-SHA-256 + AES-256-CBC 加密。
 
 ### 签署外部证书请求
 
@@ -305,7 +317,8 @@ xcert <子命令> [参数]
 | `<CN>.key` | 私钥，权限 0600；使用 `--csr` 时不生成 |
 | `<CN>.csr` | 证书请求，包含与证书一致的 `subjectAltName`；使用 `--csr` 时为外部请求的副本 |
 | `<CN>.cer` | 域名证书 |
-| `fullchain.cer` | 域名证书与证书链拼接的完整链 |
+| `fullchain.cer` | 域名证书与证书链拼接的完整链；`--code-signing` 时不生成 |
+| `<CN>.pfx` | 代码签名证书的 PKCS#12 文件（仅 `--code-signing`），含叶证书、私钥与 CA 证书链，替代 `fullchain.cer` |
 
 ## info：查看证书详情
 
@@ -470,22 +483,22 @@ CA 路径长度限制。取值 `-1` 表示不写入路径长度限制；`0` 表�
 
 ```
 ca
-├── RootCA.key
-├── RootCA.cer
-├── InteCA.key
-├── InteCA.csr
-├── InteCA.cer
-├── chain.cer
-├── xcert.db
+├── RootCA.key                root CA 私钥
+├── RootCA.cer                root CA 自签证书
+├── InteCA.key                intermediate CA 私钥
+├── InteCA.csr                intermediate CA 证书请求
+├── InteCA.cer                intermediate CA 证书
+├── chain.cer                 intermediate CA 与上级 CA 拼接的证书链
+├── xcert.db                  证书数据库（SQLite）
 ├── certs
-│   └── example.com_ecc
-│       ├── example.com.key
-│       ├── example.com.csr
-│       ├── example.com.cer
-│       └── fullchain.cer
-├── newcerts
-└── crl
-    └── InteCA.crl
+│   └── example.com_ecc       域名证书目录，命名规则 <CN>_<密钥类型>
+│       ├── example.com.key   域名私钥
+│       ├── example.com.csr   域名证书请求
+│       ├── example.com.cer   域名证书
+│       └── fullchain.cer     域名证书与证书链拼接的完整链（代码签名证书为 <CN>.pfx）
+├── newcerts                  预留目录
+└── crl                       CRL 目录
+    └── InteCA.crl            intermediate CA 签发的 CRL
 ```
 
 ## 数据库结构

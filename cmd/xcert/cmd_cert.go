@@ -4,6 +4,7 @@ import (
 	"crypto"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/pem"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -16,6 +17,7 @@ import (
 	"github.com/xireiki/xcert/pki"
 
 	"github.com/spf13/cobra"
+	pkcs12 "software.sslmate.com/src/go-pkcs12"
 )
 
 func newCertCommand() *cobra.Command {
@@ -28,6 +30,8 @@ func newCertCommand() *cobra.Command {
 		csrFile          string
 		domains          []string
 		extKeyUsage      []string
+		codeSigning      bool
+		pfxPassword      string
 		sequentialSerial bool
 	)
 	cmd := &cobra.Command{
@@ -39,7 +43,13 @@ func newCertCommand() *cobra.Command {
 			if cmd.Flags().NFlag() == 0 && len(args) == 0 {
 				return cmd.Help()
 			}
-			return runCert(&keyOptions, dir, certFile, keyFile, chainFile, csrFile, domains, extKeyUsage, sequentialSerial)
+			if codeSigning && cmd.Flags().Changed("ext-key-usage") {
+				return fmt.Errorf("--code-signing and --ext-key-usage are mutually exclusive")
+			}
+			if codeSigning && !cmd.Flags().Changed("days") {
+				keyOptions.Days = 365
+			}
+			return runCert(&keyOptions, dir, certFile, keyFile, chainFile, csrFile, domains, extKeyUsage, codeSigning, pfxPassword, sequentialSerial)
 		},
 	}
 	addKeyFlags(cmd, &keyOptions, option.KeyOptions{Cipher: "ecc", Bits: 3072, Subject: defaultCertSubject, Days: 90})
@@ -51,6 +61,8 @@ func newCertCommand() *cobra.Command {
 	flags.StringVar(&csrFile, "csr", "", "sign an existing certificate request instead of generating a key")
 	flags.StringArrayVarP(&domains, "domain", "d", nil, "domain name")
 	flags.StringSliceVar(&extKeyUsage, "ext-key-usage", []string{"serverAuth", "clientAuth"}, "extended key usage extension (comma separated)")
+	flags.BoolVar(&codeSigning, "code-signing", false, "issue a Windows code signing certificate (extended key usage codeSigning)")
+	flags.StringVar(&pfxPassword, "pfx-password", "", "password for the generated .pfx file (only with --code-signing)")
 	flags.BoolVar(&sequentialSerial, "sequential-serial", false, "use the sequential database serial number instead of a random one")
 	return cmd
 }
@@ -85,13 +97,22 @@ func resolveNames(name pkix.Name, domains []string) (pkix.Name, string, []string
 	return name, cn, dnsNames, nil
 }
 
-func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, csrFile string, domains, extKeyUsage []string, sequentialSerial bool) error {
+func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, csrFile string, domains, extKeyUsage []string, codeSigning bool, pfxPassword string, sequentialSerial bool) error {
 	if err := validateDays("--days", keyOptions.Days); err != nil {
 		return err
 	}
-	extUsages, err := pki.ParseExtKeyUsage(extKeyUsage)
-	if err != nil {
-		return err
+	if codeSigning && csrFile != "" {
+		return fmt.Errorf("--code-signing requires a private key and cannot sign an external request")
+	}
+	var extUsages []x509.ExtKeyUsage
+	if codeSigning {
+		extUsages = []x509.ExtKeyUsage{x509.ExtKeyUsageCodeSigning}
+	} else {
+		var err error
+		extUsages, err = pki.ParseExtKeyUsage(extKeyUsage)
+		if err != nil {
+			return err
+		}
 	}
 	if certFile == "" {
 		certFile = filepath.Join(dir, "InteCA.cer")
@@ -154,7 +175,12 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		return err
 	}
 	fullchainPath := filepath.Join(domainDir, "fullchain.cer")
-	if pki.Exists(fullchainPath) {
+	pfxPath := filepath.Join(domainDir, cn+".pfx")
+	artifactPath := fullchainPath
+	if codeSigning {
+		artifactPath = pfxPath
+	}
+	if pki.Exists(artifactPath) {
 		log.Warn("Certificate for domain name %s already exist\n", cn)
 		return nil
 	}
@@ -174,6 +200,9 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		}
 		if err := pki.ValidateCA(parentCert); err != nil {
 			return fmt.Errorf("%s: %w", certFile, err)
+		}
+		if codeSigning && !pki.AllowsExtKeyUsage(parentCert, x509.ExtKeyUsageCodeSigning) {
+			return fmt.Errorf("%s does not permit code signing", certFile)
 		}
 		parentKey, err = pki.LoadKey(keyFile)
 		if err != nil {
@@ -205,12 +234,16 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 			return err
 		}
 		now := time.Now()
+		keyUsage := pki.LeafKeyUsage(publicKey)
+		if codeSigning {
+			keyUsage = x509.KeyUsageDigitalSignature
+		}
 		cert, der, err := pki.Issue(publicKey, parentCert, parentKey, pki.IssueOptions{
 			Serial:         serial,
 			Subject:        name,
 			NotBefore:      now.Add(-time.Minute),
 			NotAfter:       pki.ValidUntil(parentCert, keyOptions.Days, now),
-			KeyUsage:       pki.LeafKeyUsage(publicKey),
+			KeyUsage:       keyUsage,
 			ExtKeyUsage:    extUsages,
 			DNSNames:       dnsNames,
 			IsCA:           false,
@@ -230,7 +263,29 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		}
 	}
 
-	if !pki.Exists(fullchainPath) {
+	if codeSigning {
+		if !pki.Exists(pfxPath) {
+			leaf, err := pki.LoadCert(cerPath)
+			if err != nil {
+				return err
+			}
+			signer, err := pki.LoadKey(keyPath)
+			if err != nil {
+				return err
+			}
+			caCerts, err := loadChain(chainFile)
+			if err != nil {
+				return err
+			}
+			data, err := pkcs12.Modern2023.Encode(signer, leaf, caCerts, pfxPassword)
+			if err != nil {
+				return err
+			}
+			if err := pki.WriteFile(pfxPath, data, 0600); err != nil {
+				return err
+			}
+		}
+	} else if !pki.Exists(fullchainPath) {
 		cerPEM, err := os.ReadFile(cerPath)
 		if err != nil {
 			return err
@@ -248,7 +303,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		}
 	}
 
-	done := pki.Exists(cerPath) && pki.Exists(fullchainPath)
+	done := pki.Exists(cerPath) && pki.Exists(artifactPath)
 	if !externalCSR {
 		done = done && pki.Exists(keyPath)
 	}
@@ -256,4 +311,31 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		log.Info("Done.\n")
 	}
 	return nil
+}
+
+func loadChain(path string) ([]*x509.Certificate, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+	var certs []*x509.Certificate
+	for len(data) > 0 {
+		var block *pem.Block
+		block, data = pem.Decode(data)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, err
+		}
+		certs = append(certs, cert)
+	}
+	return certs, nil
 }

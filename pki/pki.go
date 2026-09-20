@@ -299,6 +299,18 @@ func ValidateCRLSigner(cert *x509.Certificate) error {
 	return nil
 }
 
+func AllowsExtKeyUsage(cert *x509.Certificate, usage x509.ExtKeyUsage) bool {
+	if len(cert.ExtKeyUsage) == 0 {
+		return true
+	}
+	for _, value := range cert.ExtKeyUsage {
+		if value == x509.ExtKeyUsageAny || value == usage {
+			return true
+		}
+	}
+	return false
+}
+
 func SignatureAlgorithm(digest string, key crypto.Signer) (x509.SignatureAlgorithm, error) {
 	switch key.(type) {
 	case *rsa.PrivateKey:
