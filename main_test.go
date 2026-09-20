@@ -35,6 +35,19 @@ func TestChain(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("chain verification failed: %v", err)
 	}
+
+	st, err := openStore(filepath.Join(ca, dbFileName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.close()
+	var count int
+	if err := st.db.QueryRow(`SELECT count(*) FROM certs`).Scan(&count); err != nil {
+		t.Fatal(err)
+	}
+	if count != 3 {
+		t.Fatalf("expected 3 certs recorded, got %d", count)
+	}
 }
 
 func exec(t *testing.T, args ...string) {

@@ -294,13 +294,14 @@ func runRoot(o *rootOptions) error {
 		if err := writeFile(certPath, encodeCert(der), 0644); err != nil {
 			return err
 		}
-	}
-
-	if err := writeFile(filepath.Join(o.dir, "serial"), []byte("00"), 0644); err != nil {
-		return err
-	}
-	if err := writeFile(filepath.Join(o.dir, "index.txt"), nil, 0644); err != nil {
-		return err
+		st, err := openStore(filepath.Join(o.dir, dbFileName))
+		if err != nil {
+			return err
+		}
+		defer st.close()
+		if err := st.record(serial, tmpl.Subject.String(), "root", "RootCA", certPath, keyPath, now, tmpl.NotAfter); err != nil {
+			return err
+		}
 	}
 
 	if exists(keyPath) && exists(certPath) {
@@ -311,9 +312,10 @@ func runRoot(o *rootOptions) error {
 
 type inteOptions struct {
 	keyOptions
-	dir  string
-	cert string
-	key  string
+	dir        string
+	cert       string
+	key        string
+	randSerial bool
 }
 
 func newInteCmd() *cobra.Command {
@@ -332,7 +334,7 @@ func newInteCmd() *cobra.Command {
 	f.StringVarP(&o.dir, "output", "o", ".", "directory to save files")
 	f.StringVarP(&o.cert, "cert", "c", "", "intermediate certificate")
 	f.StringVarP(&o.key, "key", "k", "", "intermediate certificate key")
-	f.BoolP("rand-serial", "R", false, "use a random serial number")
+	f.BoolVarP(&o.randSerial, "rand-serial", "R", false, "use a random serial number")
 	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpWithInteCommand() })
 	return cmd
 }
@@ -357,12 +359,11 @@ func runInte(o *inteOptions) error {
 			return err
 		}
 	}
-	if err := writeFile(filepath.Join(o.dir, "serial"), []byte("00"), 0644); err != nil {
+	st, err := openStore(filepath.Join(o.dir, dbFileName))
+	if err != nil {
 		return err
 	}
-	if err := writeFile(filepath.Join(o.dir, "index.txt"), nil, 0644); err != nil {
-		return err
-	}
+	defer st.close()
 	info("Refresh Database\n")
 
 	info("Start generating certificate\n")
@@ -401,7 +402,7 @@ func runInte(o *inteOptions) error {
 		if err != nil {
 			return err
 		}
-		serial, err := randomSerial()
+		serial, err := st.nextSerial(o.randSerial)
 		if err != nil {
 			return err
 		}
@@ -440,6 +441,9 @@ func runInte(o *inteOptions) error {
 		if err := writeFile(filepath.Join(o.dir, "chain.cer"), append(cerPEM, parentPEM...), 0644); err != nil {
 			return err
 		}
+		if err := st.record(serial, tmpl.Subject.String(), "inte", "InteCA", certPath, keyPath, now, tmpl.NotAfter); err != nil {
+			return err
+		}
 	}
 
 	if exists(keyPath) && exists(certPath) {
@@ -450,11 +454,12 @@ func runInte(o *inteOptions) error {
 
 type certOptions struct {
 	keyOptions
-	dir     string
-	cert    string
-	key     string
-	chain   string
-	domains []string
+	dir        string
+	cert       string
+	key        string
+	chain      string
+	domains    []string
+	randSerial bool
 }
 
 func newCertCmd() *cobra.Command {
@@ -476,7 +481,7 @@ func newCertCmd() *cobra.Command {
 	f.StringVarP(&o.key, "key", "k", "", "signing certificate key")
 	f.StringVar(&o.chain, "chain", "", "certificate chain")
 	f.StringArrayVarP(&o.domains, "domain", "d", nil, "domain name")
-	f.BoolP("rand-serial", "R", false, "use a random serial number")
+	f.BoolVarP(&o.randSerial, "rand-serial", "R", false, "use a random serial number")
 	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpWithCertCommand() })
 	return cmd
 }
@@ -502,6 +507,12 @@ func runCert(o *certOptions) error {
 
 	info("Refresh Database\n")
 	info("Start generating certificate\n")
+
+	st, err := openStore(filepath.Join(o.dir, dbFileName))
+	if err != nil {
+		return err
+	}
+	defer st.close()
 
 	domainDir := filepath.Join(o.dir, "certs", cn+"_"+o.cipher)
 	if err := os.MkdirAll(domainDir, 0755); err != nil {
@@ -549,7 +560,7 @@ func runCert(o *certOptions) error {
 		if err != nil {
 			return err
 		}
-		serial, err := randomSerial()
+		serial, err := st.nextSerial(o.randSerial)
 		if err != nil {
 			return err
 		}
@@ -585,6 +596,9 @@ func runCert(o *certOptions) error {
 			fullchain = append(fullchain, chainPEM...)
 		}
 		if err := writeFile(fullchainPath, fullchain, 0644); err != nil {
+			return err
+		}
+		if err := st.record(serial, name.String(), "cert", cn, cerPath, keyPath, now, tmpl.NotAfter); err != nil {
 			return err
 		}
 	}
