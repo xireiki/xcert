@@ -27,6 +27,7 @@ func newCertCommand() *cobra.Command {
 		chainFile        string
 		csrFile          string
 		domains          []string
+		extKeyUsage      []string
 		sequentialSerial bool
 	)
 	cmd := &cobra.Command{
@@ -38,7 +39,7 @@ func newCertCommand() *cobra.Command {
 			if cmd.Flags().NFlag() == 0 && len(args) == 0 {
 				return cmd.Help()
 			}
-			return runCert(&keyOptions, dir, certFile, keyFile, chainFile, csrFile, domains, sequentialSerial)
+			return runCert(&keyOptions, dir, certFile, keyFile, chainFile, csrFile, domains, extKeyUsage, sequentialSerial)
 		},
 	}
 	addKeyFlags(cmd, &keyOptions, option.KeyOptions{Cipher: "ecc", Bits: 3072, Subject: defaultCertSubject, Days: 90})
@@ -49,6 +50,7 @@ func newCertCommand() *cobra.Command {
 	flags.StringVar(&chainFile, "chain", "", "certificate chain")
 	flags.StringVar(&csrFile, "csr", "", "sign an existing certificate request instead of generating a key")
 	flags.StringArrayVarP(&domains, "domain", "d", nil, "domain name")
+	flags.StringSliceVar(&extKeyUsage, "ext-key-usage", []string{"serverAuth", "clientAuth"}, "extended key usage extension (comma separated)")
 	flags.BoolVar(&sequentialSerial, "sequential-serial", false, "use the sequential database serial number instead of a random one")
 	return cmd
 }
@@ -83,8 +85,12 @@ func resolveNames(name pkix.Name, domains []string) (pkix.Name, string, []string
 	return name, cn, dnsNames, nil
 }
 
-func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, csrFile string, domains []string, sequentialSerial bool) error {
+func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, csrFile string, domains, extKeyUsage []string, sequentialSerial bool) error {
 	if err := validateDays("--days", keyOptions.Days); err != nil {
+		return err
+	}
+	extUsages, err := pki.ParseExtKeyUsage(extKeyUsage)
+	if err != nil {
 		return err
 	}
 	if certFile == "" {
@@ -205,7 +211,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 			NotBefore:      now.Add(-time.Minute),
 			NotAfter:       pki.ValidUntil(parentCert, keyOptions.Days, now),
 			KeyUsage:       pki.LeafKeyUsage(publicKey),
-			ExtKeyUsage:    []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+			ExtKeyUsage:    extUsages,
 			DNSNames:       dnsNames,
 			IsCA:           false,
 			AuthorityKeyID: true,

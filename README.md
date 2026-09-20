@@ -247,6 +247,7 @@ xcert <子命令> [参数]
 | `-c`, `--cert` | `<dir>/InteCA.cer` | 签发证书所用的 CA 证书 |
 | `-k`, `--key` | `<dir>/InteCA.key` | 签发证书所用的 CA 私钥 |
 | `--chain` | `<dir>/chain.cer` | 用于拼接 `fullchain.cer` 的证书链 |
+| `--ext-key-usage` | `serverAuth,clientAuth` | 扩展密钥用法，逗号分隔；为空则不写入该扩展 |
 | `-d`, `--domain` | 无 | 域名，可重复指定 |
 | `--csr` | 无 | 签署外部证书请求，使用请求中的公钥与主体，不再生成私钥与请求 |
 | `--sequential-serial` | `false` | 使用数据库递增计数器作为序列号；默认使用随机序列号 |
@@ -271,9 +272,9 @@ xcert <子命令> [参数]
 - 生成 `<CN>` 的完整证书链 `fullchain.cer`，内容为 `<CN>.cer` 与 `--chain` 指定文件内容的拼接；若 `<CN>.cer` 已存在而 `fullchain.cer` 缺失，会直接重建。
 - 将域名证书记录写入数据库，类型为 `cert`，名称为 `CN`。
 - 证书 `NotAfter` 取请求天数与签发 CA 的 `NotAfter` 中的较小值，保证不超过签发者有效期。
-- 若签发 CA 不带 SKI，则使用其公钥的 SHA-1 摘要作为 AKI。
+- 若签发 CA 不带 SKI，则不附带 AKI。
 
-密钥用法依据密钥类型自动确定：ECDSA 与 ed25519 私钥使用 `digitalSignature`；RSA 私钥使用 `digitalSignature,keyEncipherment`。扩展密钥用法为 `serverAuth,clientAuth`，`basicConstraints` 为 `CA:FALSE`。签名摘要算法固定为 SHA-256。
+密钥用法依据密钥类型自动确定：ECDSA 与 ed25519 私钥使用 `digitalSignature`；RSA 私钥使用 `digitalSignature,keyEncipherment`。扩展密钥用法由 `--ext-key-usage` 决定，默认为 `serverAuth,clientAuth`，`basicConstraints` 为 `CA:FALSE`。签名摘要算法固定为 SHA-256。
 
 ### 签署外部证书请求
 
@@ -371,7 +372,7 @@ CRL 使用 `X509 CRL` PEM 格式，CRL 编号来自数据库 `meta` 表中的独
 
 ## 证书能力参数详解
 
-`--key-usage`、`--ext-key-usage`、`--path-length`、`--digest`、`--subject-key-id`、`--authority-key-id` 仅 `root` 与 `inte` 支持。
+`--key-usage`、`--path-length`、`--digest`、`--subject-key-id`、`--authority-key-id` 仅 `root` 与 `inte` 支持；`--ext-key-usage` 由 `root`、`inte` 与 `cert` 支持。
 
 ### --key-usage
 
@@ -409,6 +410,8 @@ CRL 使用 `X509 CRL` PEM 格式，CRL 编号来自数据库 `meta` 表中的独
 | `any` / `anyExtendedKeyUsage` | 任意用途 |
 
 未识别的取值会报错。
+
+`cert` 的默认值为 `serverAuth,clientAuth`；传空值（如 `--ext-key-usage=`）时不写入该扩展。
 
 ### --path-length
 

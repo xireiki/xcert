@@ -118,6 +118,22 @@ func TestSignCSR(t *testing.T) {
 	}
 }
 
+func TestCertExtKeyUsage(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca")
+	exec(t, "root", "-D", ca)
+	exec(t, "inte", "-D", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"))
+	exec(t, "cert", "-D", ca, "-d", "eku.test", "--ext-key-usage", "clientAuth")
+
+	block, _ := pem.Decode(mustRead(t, filepath.Join(ca, "certs", "eku.test_ecc", "eku.test.cer")))
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cert.ExtKeyUsage) != 1 || cert.ExtKeyUsage[0] != x509.ExtKeyUsageClientAuth {
+		t.Fatalf("expected only clientAuth, got %v", cert.ExtKeyUsage)
+	}
+}
+
 func TestSequentialSerial(t *testing.T) {
 	ca := filepath.Join(t.TempDir(), "ca")
 	exec(t, "root", "-D", ca)
