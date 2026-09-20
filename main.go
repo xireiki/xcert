@@ -1,0 +1,681 @@
+package main
+
+import (
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha1"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
+	"encoding/pem"
+	"fmt"
+	"math/big"
+	"os"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"github.com/spf13/cobra"
+)
+
+const (
+	defaultRootSubject = "/C=CN/O=Test SSL/CN=Test SSL CA"
+	defaultInteSubject = "/C=CN/O=Test SSL/CN=Test Inte CA"
+	defaultCertSubject = "/C=CN"
+)
+
+var (
+	progName = filepath.Base(os.Args[0])
+	color    = os.Getenv("TERM") == "xterm-256color"
+	oidEmail = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 1}
+)
+
+func info(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	if color {
+		fmt.Printf("\033[32mINFO\033[0m %s", msg)
+	} else {
+		fmt.Printf("INFO %s", msg)
+	}
+}
+
+func warn(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	if color {
+		fmt.Printf("\033[33mWARN\033[0m %s", msg)
+	} else {
+		fmt.Printf("WARN %s", msg)
+	}
+}
+
+func erro(format string, a ...any) {
+	msg := fmt.Sprintf(format, a...)
+	if color {
+		fmt.Fprintf(os.Stderr, "\033[31mERRO\033[0m %s", msg)
+	} else {
+		fmt.Fprintf(os.Stderr, "ERRO %s", msg)
+	}
+}
+
+func exists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
+}
+
+func writeFile(path string, data []byte, perm os.FileMode) error {
+	if err := os.WriteFile(path, data, perm); err != nil {
+		return fmt.Errorf("failed to write %s: %w", path, err)
+	}
+	return nil
+}
+
+func parseSubject(s string) pkix.Name {
+	var n pkix.Name
+	for _, part := range strings.Split(s, "/") {
+		if part == "" {
+			continue
+		}
+		kv := strings.SplitN(part, "=", 2)
+		if len(kv) != 2 {
+			continue
+		}
+		k, v := strings.TrimSpace(strings.ToUpper(kv[0])), kv[1]
+		switch k {
+		case "C":
+			n.Country = append(n.Country, v)
+		case "ST", "S":
+			n.Province = append(n.Province, v)
+		case "L":
+			n.Locality = append(n.Locality, v)
+		case "O":
+			n.Organization = append(n.Organization, v)
+		case "OU":
+			n.OrganizationalUnit = append(n.OrganizationalUnit, v)
+		case "CN":
+			n.CommonName = v
+		case "EMAILADDRESS", "E":
+			n.ExtraNames = append(n.ExtraNames, pkix.AttributeTypeAndValue{Type: oidEmail, Value: v})
+		}
+	}
+	return n
+}
+
+func generateKey(cipher string, bits int) (crypto.Signer, []byte, error) {
+	switch cipher {
+	case "ecc":
+		key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return nil, nil, err
+		}
+		der, err := x509.MarshalECPrivateKey(key)
+		if err != nil {
+			return nil, nil, err
+		}
+		return key, pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der}), nil
+	case "rsa":
+		if bits < 512 {
+			return nil, nil, fmt.Errorf("RSA key length too small: %d", bits)
+		}
+		key, err := rsa.GenerateKey(rand.Reader, bits)
+		if err != nil {
+			return nil, nil, err
+		}
+		return key, pem.EncodeToMemory(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: x509.MarshalPKCS1PrivateKey(key)}), nil
+	default:
+		return nil, nil, fmt.Errorf("Unknown private key type: %s", cipher)
+	}
+}
+
+func loadKey(path string) (crypto.Signer, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM key: %s", path)
+	}
+	if key, err := x509.ParseECPrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(block.Bytes); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParsePKCS8PrivateKey(block.Bytes); err == nil {
+		switch k := key.(type) {
+		case *rsa.PrivateKey:
+			return k, nil
+		case *ecdsa.PrivateKey:
+			return k, nil
+		}
+	}
+	return nil, fmt.Errorf("unsupported private key: %s", path)
+}
+
+func loadCert(path string) (*x509.Certificate, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	block, _ := pem.Decode(data)
+	if block == nil {
+		return nil, fmt.Errorf("failed to decode PEM certificate: %s", path)
+	}
+	return x509.ParseCertificate(block.Bytes)
+}
+
+func sigAlg(key crypto.Signer) x509.SignatureAlgorithm {
+	switch key.(type) {
+	case *rsa.PrivateKey:
+		return x509.SHA512WithRSA
+	case *ecdsa.PrivateKey:
+		return x509.ECDSAWithSHA512
+	}
+	return x509.UnknownSignatureAlgorithm
+}
+
+func randomSerial() (*big.Int, error) {
+	limit := new(big.Int).Lsh(big.NewInt(1), 128)
+	n, err := rand.Int(rand.Reader, limit)
+	if err != nil {
+		return nil, err
+	}
+	if n.Sign() == 0 {
+		n = big.NewInt(1)
+	}
+	return n, nil
+}
+
+func subjectKeyID(pub crypto.PublicKey) ([]byte, error) {
+	der, err := x509.MarshalPKIXPublicKey(pub)
+	if err != nil {
+		return nil, err
+	}
+	sum := sha1.Sum(der)
+	return sum[:], nil
+}
+
+func encodeCert(der []byte) []byte {
+	return pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+}
+
+type keyOptions struct {
+	cipher  string
+	bits    int
+	subject string
+	days    int
+}
+
+func addKeyFlags(cmd *cobra.Command, o *keyOptions, defaults keyOptions) {
+	f := cmd.Flags()
+	f.StringVarP(&o.cipher, "cipher", "C", defaults.cipher, "encryption method for the private key")
+	f.IntVar(&o.bits, "rsa-bit-number", defaults.bits, "key length for RSA private keys")
+	f.StringVarP(&o.subject, "subject", "s", defaults.subject, "subject information")
+	f.StringVar(&o.subject, "subj", defaults.subject, "subject information")
+	f.IntVar(&o.days, "days", defaults.days, "expiration time in days")
+}
+
+type rootOptions struct {
+	keyOptions
+	dir string
+}
+
+func newRootCmd() *cobra.Command {
+	o := &rootOptions{}
+	cmd := &cobra.Command{
+		Use:           "root",
+		Short:         "Create a root certificate",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runRoot(o)
+		},
+	}
+	addKeyFlags(cmd, &o.keyOptions, keyOptions{cipher: "ecc", bits: 3072, subject: defaultRootSubject, days: 3650})
+	cmd.Flags().StringVarP(&o.dir, "output", "o", ".", "directory to save files")
+	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpWithRootCommand() })
+	return cmd
+}
+
+func runRoot(o *rootOptions) error {
+	certPath := filepath.Join(o.dir, "RootCA.cer")
+	if exists(certPath) {
+		warn("Root certificate already exists\n")
+		return nil
+	}
+	for _, d := range []string{filepath.Join(o.dir, "newcerts"), filepath.Join(o.dir, "crl")} {
+		if err := os.MkdirAll(d, 0755); err != nil {
+			return err
+		}
+	}
+
+	keyPath := filepath.Join(o.dir, "RootCA.key")
+	if !exists(keyPath) {
+		_, keyPEM, err := generateKey(o.cipher, o.bits)
+		if err != nil {
+			return err
+		}
+		if err := writeFile(keyPath, keyPEM, 0600); err != nil {
+			return err
+		}
+	}
+
+	if !exists(certPath) {
+		key, err := loadKey(keyPath)
+		if err != nil {
+			return err
+		}
+		serial, err := randomSerial()
+		if err != nil {
+			return err
+		}
+		skid, err := subjectKeyID(key.Public())
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		tmpl := &x509.Certificate{
+			SerialNumber:          serial,
+			Subject:               parseSubject(o.subject),
+			NotBefore:             now,
+			NotAfter:              now.AddDate(0, 0, o.days),
+			BasicConstraintsValid: true,
+			IsCA:                  true,
+			SubjectKeyId:          skid,
+			SignatureAlgorithm:    sigAlg(key),
+		}
+		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
+		if err != nil {
+			return err
+		}
+		if err := writeFile(certPath, encodeCert(der), 0644); err != nil {
+			return err
+		}
+	}
+
+	if err := writeFile(filepath.Join(o.dir, "serial"), []byte("00"), 0644); err != nil {
+		return err
+	}
+	if err := writeFile(filepath.Join(o.dir, "index.txt"), nil, 0644); err != nil {
+		return err
+	}
+
+	if exists(keyPath) && exists(certPath) {
+		info("Done.\n")
+	}
+	return nil
+}
+
+type inteOptions struct {
+	keyOptions
+	dir  string
+	cert string
+	key  string
+}
+
+func newInteCmd() *cobra.Command {
+	o := &inteOptions{}
+	cmd := &cobra.Command{
+		Use:           "inte",
+		Short:         "Create Intermediate Certificate",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runInte(o)
+		},
+	}
+	addKeyFlags(cmd, &o.keyOptions, keyOptions{cipher: "ecc", bits: 3072, subject: defaultInteSubject, days: 1825})
+	f := cmd.Flags()
+	f.StringVarP(&o.dir, "output", "o", ".", "directory to save files")
+	f.StringVarP(&o.cert, "cert", "c", "", "intermediate certificate")
+	f.StringVarP(&o.key, "key", "k", "", "intermediate certificate key")
+	f.BoolP("rand-serial", "R", false, "use a random serial number")
+	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpWithInteCommand() })
+	return cmd
+}
+
+func runInte(o *inteOptions) error {
+	certPath := filepath.Join(o.dir, "InteCA.cer")
+	if exists(certPath) {
+		warn("Intermediate certificate already exists\n")
+		return nil
+	}
+	if o.cert == "" || o.key == "" {
+		return fmt.Errorf("intermediate CA requires -c/--cert and -k/--key")
+	}
+	if !exists(o.cert) {
+		return fmt.Errorf("certificate not found: %s", o.cert)
+	}
+	if !exists(o.key) {
+		return fmt.Errorf("key not found: %s", o.key)
+	}
+	for _, d := range []string{"newcerts", "crl", "certs"} {
+		if err := os.MkdirAll(filepath.Join(o.dir, d), 0755); err != nil {
+			return err
+		}
+	}
+	if err := writeFile(filepath.Join(o.dir, "serial"), []byte("00"), 0644); err != nil {
+		return err
+	}
+	if err := writeFile(filepath.Join(o.dir, "index.txt"), nil, 0644); err != nil {
+		return err
+	}
+	info("Refresh Database\n")
+
+	info("Start generating certificate\n")
+	keyPath := filepath.Join(o.dir, "InteCA.key")
+	if !exists(keyPath) {
+		_, keyPEM, err := generateKey(o.cipher, o.bits)
+		if err != nil {
+			return err
+		}
+		if err := writeFile(keyPath, keyPEM, 0600); err != nil {
+			return err
+		}
+	}
+	keySigner, err := loadKey(keyPath)
+	if err != nil {
+		return err
+	}
+
+	csrPath := filepath.Join(o.dir, "InteCA.csr")
+	if !exists(csrPath) {
+		der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: parseSubject(o.subject)}, keySigner)
+		if err != nil {
+			return err
+		}
+		if err := writeFile(csrPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der}), 0644); err != nil {
+			return err
+		}
+	}
+
+	if !exists(certPath) {
+		parentCert, err := loadCert(o.cert)
+		if err != nil {
+			return err
+		}
+		parentKey, err := loadKey(o.key)
+		if err != nil {
+			return err
+		}
+		serial, err := randomSerial()
+		if err != nil {
+			return err
+		}
+		skid, err := subjectKeyID(keySigner.Public())
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		tmpl := &x509.Certificate{
+			SerialNumber:          serial,
+			Subject:               parseSubject(o.subject),
+			NotBefore:             now,
+			NotAfter:              now.AddDate(0, 0, o.days),
+			BasicConstraintsValid: true,
+			IsCA:                  true,
+			MaxPathLen:            0,
+			MaxPathLenZero:        true,
+			KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+			SubjectKeyId:          skid,
+			AuthorityKeyId:        parentCert.SubjectKeyId,
+			SignatureAlgorithm:    sigAlg(parentKey),
+		}
+		der, err := x509.CreateCertificate(rand.Reader, tmpl, parentCert, keySigner.Public(), parentKey)
+		if err != nil {
+			return err
+		}
+		cerPEM := encodeCert(der)
+		if err := writeFile(certPath, cerPEM, 0644); err != nil {
+			return err
+		}
+		parentPEM, err := os.ReadFile(o.cert)
+		if err != nil {
+			return err
+		}
+		if err := writeFile(filepath.Join(o.dir, "chain.cer"), append(cerPEM, parentPEM...), 0644); err != nil {
+			return err
+		}
+	}
+
+	if exists(keyPath) && exists(certPath) {
+		info("Done.\n")
+	}
+	return nil
+}
+
+type certOptions struct {
+	keyOptions
+	dir     string
+	cert    string
+	key     string
+	chain   string
+	domains []string
+}
+
+func newCertCmd() *cobra.Command {
+	o := &certOptions{}
+	cmd := &cobra.Command{
+		Use:           "cert",
+		Aliases:       []string{"sign"},
+		Short:         "Create Domain Name Certificate",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return runCert(o)
+		},
+	}
+	addKeyFlags(cmd, &o.keyOptions, keyOptions{cipher: "ecc", bits: 3072, subject: defaultCertSubject, days: 90})
+	f := cmd.Flags()
+	f.StringVarP(&o.dir, "dir", "D", ".", "certificate directory")
+	f.StringVarP(&o.cert, "cert", "c", "", "signing certificate")
+	f.StringVarP(&o.key, "key", "k", "", "signing certificate key")
+	f.StringVar(&o.chain, "chain", "", "certificate chain")
+	f.StringArrayVarP(&o.domains, "domain", "d", nil, "domain name")
+	f.BoolP("rand-serial", "R", false, "use a random serial number")
+	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpWithCertCommand() })
+	return cmd
+}
+
+func runCert(o *certOptions) error {
+	if o.cert == "" {
+		o.cert = filepath.Join(o.dir, "InteCA.cer")
+	}
+	if o.key == "" {
+		o.key = filepath.Join(o.dir, "InteCA.key")
+	}
+	if o.chain == "" {
+		o.chain = filepath.Join(o.dir, "chain.cer")
+	}
+	name := parseSubject(o.subject)
+	cn := name.CommonName
+	if len(o.domains) >= 1 {
+		cn = o.domains[0]
+	}
+	if cn == "" {
+		return fmt.Errorf("common name is empty, set --domain or --subject")
+	}
+
+	info("Refresh Database\n")
+	info("Start generating certificate\n")
+
+	domainDir := filepath.Join(o.dir, "certs", cn+"_"+o.cipher)
+	if err := os.MkdirAll(domainDir, 0755); err != nil {
+		return err
+	}
+	fullchainPath := filepath.Join(domainDir, "fullchain.cer")
+	if exists(fullchainPath) {
+		warn("Certificate for domain name %s already exist\n", cn)
+		return nil
+	}
+
+	keyPath := filepath.Join(domainDir, cn+".key")
+	if !exists(keyPath) {
+		_, keyPEM, err := generateKey(o.cipher, o.bits)
+		if err != nil {
+			return err
+		}
+		if err := writeFile(keyPath, keyPEM, 0600); err != nil {
+			return err
+		}
+	}
+	keySigner, err := loadKey(keyPath)
+	if err != nil {
+		return err
+	}
+
+	csrPath := filepath.Join(domainDir, cn+".csr")
+	if !exists(csrPath) {
+		der, err := x509.CreateCertificateRequest(rand.Reader, &x509.CertificateRequest{Subject: name}, keySigner)
+		if err != nil {
+			return err
+		}
+		if err := writeFile(csrPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: der}), 0644); err != nil {
+			return err
+		}
+	}
+
+	cerPath := filepath.Join(domainDir, cn+".cer")
+	if exists(csrPath) && exists(keyPath) && !exists(cerPath) {
+		parentCert, err := loadCert(o.cert)
+		if err != nil {
+			return err
+		}
+		parentKey, err := loadKey(o.key)
+		if err != nil {
+			return err
+		}
+		serial, err := randomSerial()
+		if err != nil {
+			return err
+		}
+		now := time.Now()
+		tmpl := &x509.Certificate{
+			SerialNumber:          serial,
+			Subject:               name,
+			NotBefore:             now,
+			NotAfter:              now.AddDate(0, 0, o.days),
+			KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
+			BasicConstraintsValid: true,
+			AuthorityKeyId:        parentCert.SubjectKeyId,
+			SignatureAlgorithm:    sigAlg(parentKey),
+		}
+		if len(o.domains) > 1 {
+			tmpl.DNSNames = append(tmpl.DNSNames, o.domains...)
+		}
+		der, err := x509.CreateCertificate(rand.Reader, tmpl, parentCert, keySigner.Public(), parentKey)
+		if err != nil {
+			return err
+		}
+		cerPEM := encodeCert(der)
+		if err := writeFile(cerPath, cerPEM, 0644); err != nil {
+			return err
+		}
+		fullchain := cerPEM
+		if exists(o.chain) {
+			chainPEM, err := os.ReadFile(o.chain)
+			if err != nil {
+				return err
+			}
+			fullchain = append(fullchain, chainPEM...)
+		}
+		if err := writeFile(fullchainPath, fullchain, 0644); err != nil {
+			return err
+		}
+	}
+
+	if exists(keyPath) && exists(cerPath) && exists(fullchainPath) {
+		info("Done.\n")
+	}
+	return nil
+}
+
+func newRootCommand() *cobra.Command {
+	root := &cobra.Command{
+		Use:           progName,
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.ArbitraryArgs,
+		CompletionOptions: cobra.CompletionOptions{
+			DisableDefaultCmd: true,
+		},
+		RunE: func(cmd *cobra.Command, args []string) error {
+			if len(args) == 0 {
+				return fmt.Errorf("Use \"%s help\" to view the help text", cmd.Name())
+			}
+			return fmt.Errorf("Unknown subcommand %s, use \"%s help\" for help", args[0], cmd.Name())
+		},
+	}
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpCommand() })
+	root.AddCommand(newRootCmd(), newInteCmd(), newCertCmd())
+	return root
+}
+
+func helpCommand() {
+	fmt.Printf(`Usage: %s SubCommand
+
+SubCommand:
+	root  Create a root certificate
+	inte  Create Intermediate Certificate
+	cert  Create Domain Name Certificate
+	sign  Same as cert
+	help  Show this help text
+`, progName)
+}
+
+func helpWithRootCommand() {
+	fmt.Printf(`Usage: %s root Options
+
+Options:
+	-h, --help        Show this help text
+	-C, --cipher      Sets the encryption method used when generating the private key(Default: ecc)
+	--rsa-bit-number  Sets the key length when generating the RSA private key
+	-o                Set the file save directory(Default: .)
+	--days            Set the expiration time(Default: 3650)
+	-s, -subject      Set Subject Information(Default: "/C=CN/O=Test SSL/CN=Test SSL CA")
+`, progName)
+}
+
+func helpWithInteCommand() {
+	fmt.Printf(`Usage: %s inte Options
+
+Options:
+	-h, --help        Show this help text
+	-C, --cipher      Sets the encryption method used when generating the private key(Default: ecc)
+	--rsa-bit-number  Sets the key length when generating the RSA private key
+	-o                Set the file save directory(Default: .)
+	-c, --cert        Set Intermediate Certificate
+	-k, --key         Set Intermediate Certificate Key
+	--days            Set the expiration time(Default: 1825)
+	-s, -subject      Set Subject Information(Default: "/C=CN/O=Test SSL/CN=Test Inte CA")
+`, progName)
+}
+
+func helpWithCertCommand() {
+	fmt.Printf(`Usage: %s cert|sign Options
+
+Options:
+	-h, --help        Show this help text
+	-C, --cipher      Sets the encryption method used when generating the private key(Default: ecc)
+	--rsa-bit-number  Sets the key length when generating the RSA private key
+	-o                Set the file save directory(Default: <CertDir>/certs/<Domain>_<Type>)
+	-D                Set up the certificate directory(Default: .)
+	-c, --cert        Set Certificate(Default: <CertDir>/InteCA.cer)
+	-k, --key         Set Certificate Key(Default: <CertDir>/InteCA.key)
+	--chain           Set up a certificate chain(Default: <CertDir>/chain.cer)
+	--days            Set the expiration time(Default: 90)
+	-s, -subject      Set Subject Information(Default: "/C=CN")
+`, progName)
+}
+
+func main() {
+	if err := newRootCommand().Execute(); err != nil {
+		erro("%s\n", err)
+		os.Exit(1)
+	}
+}
