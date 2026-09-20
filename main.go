@@ -218,8 +218,152 @@ func addKeyFlags(cmd *cobra.Command, o *keyOptions, defaults keyOptions) {
 	f.IntVar(&o.days, "days", defaults.days, "expiration time in days")
 }
 
+type caOptions struct {
+	keyUsage       []string
+	extKeyUsage    []string
+	pathlen        int
+	md             string
+	subjectKeyID   bool
+	authorityKeyID bool
+}
+
+func addCAFlags(cmd *cobra.Command, o *caOptions, defaults caOptions) {
+	f := cmd.Flags()
+	f.StringSliceVar(&o.keyUsage, "key-usage", defaults.keyUsage, "key usage extension (comma separated)")
+	f.StringSliceVar(&o.extKeyUsage, "ext-key-usage", defaults.extKeyUsage, "extended key usage extension (comma separated)")
+	f.IntVar(&o.pathlen, "pathlen", defaults.pathlen, "CA path length, -1 for unset")
+	f.StringVar(&o.md, "md", defaults.md, "signature hash algorithm (sha256, sha384, sha512)")
+	f.BoolVar(&o.subjectKeyID, "subject-key-id", defaults.subjectKeyID, "include subject key identifier")
+	f.BoolVar(&o.authorityKeyID, "authority-key-id", defaults.authorityKeyID, "include authority key identifier")
+}
+
+var oidBasicConstraints = asn1.ObjectIdentifier{2, 5, 29, 19}
+
+func applyCAOptions(tmpl *x509.Certificate, o *caOptions, publicKey crypto.PublicKey) error {
+	if o.subjectKeyID {
+		tmpl.IsCA = true
+		tmpl.BasicConstraintsValid = true
+		if o.pathlen >= 0 {
+			tmpl.MaxPathLen = o.pathlen
+			tmpl.MaxPathLenZero = o.pathlen == 0
+		}
+		skid, err := subjectKeyID(publicKey)
+		if err != nil {
+			return err
+		}
+		tmpl.SubjectKeyId = skid
+		return nil
+	}
+	// Keep IsCA false so the stdlib does not force a subject key identifier,
+	// then encode basicConstraints ourselves.
+	if o.pathlen < 0 {
+		value, err := asn1.Marshal(struct {
+			IsCA bool `asn1:"optional"`
+		}{true})
+		if err != nil {
+			return err
+		}
+		tmpl.ExtraExtensions = append(tmpl.ExtraExtensions, pkix.Extension{Id: oidBasicConstraints, Critical: true, Value: value})
+		return nil
+	}
+	value, err := asn1.Marshal(struct {
+		IsCA       bool `asn1:"optional"`
+		MaxPathLen int
+	}{true, o.pathlen})
+	if err != nil {
+		return err
+	}
+	tmpl.ExtraExtensions = append(tmpl.ExtraExtensions, pkix.Extension{Id: oidBasicConstraints, Critical: true, Value: value})
+	return nil
+}
+
+var keyUsageNames = map[string]x509.KeyUsage{
+	"digitalSignature":  x509.KeyUsageDigitalSignature,
+	"nonRepudiation":    x509.KeyUsageContentCommitment,
+	"contentCommitment": x509.KeyUsageContentCommitment,
+	"keyEncipherment":   x509.KeyUsageKeyEncipherment,
+	"dataEncipherment":  x509.KeyUsageDataEncipherment,
+	"keyAgreement":      x509.KeyUsageKeyAgreement,
+	"keyCertSign":       x509.KeyUsageCertSign,
+	"cRLSign":           x509.KeyUsageCRLSign,
+	"crlSign":           x509.KeyUsageCRLSign,
+	"encipherOnly":      x509.KeyUsageEncipherOnly,
+	"decipherOnly":      x509.KeyUsageDecipherOnly,
+}
+
+var extKeyUsageNames = map[string]x509.ExtKeyUsage{"serverAuth": x509.ExtKeyUsageServerAuth,
+	"clientAuth":          x509.ExtKeyUsageClientAuth,
+	"codeSigning":         x509.ExtKeyUsageCodeSigning,
+	"emailProtection":     x509.ExtKeyUsageEmailProtection,
+	"ipsecEndSystem":      x509.ExtKeyUsageIPSECEndSystem,
+	"ipsecTunnel":         x509.ExtKeyUsageIPSECTunnel,
+	"ipsecUser":           x509.ExtKeyUsageIPSECUser,
+	"timeStamping":        x509.ExtKeyUsageTimeStamping,
+	"ocspSigning":         x509.ExtKeyUsageOCSPSigning,
+	"OCSPSigning":         x509.ExtKeyUsageOCSPSigning,
+	"any":                 x509.ExtKeyUsageAny,
+	"anyExtendedKeyUsage": x509.ExtKeyUsageAny,
+}
+
+func parseKeyUsage(names []string) (x509.KeyUsage, error) {
+	var usage x509.KeyUsage
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		v, ok := keyUsageNames[name]
+		if !ok {
+			return 0, fmt.Errorf("unknown key usage: %s", name)
+		}
+		usage |= v
+	}
+	return usage, nil
+}
+
+func parseExtKeyUsage(names []string) ([]x509.ExtKeyUsage, error) {
+	var usages []x509.ExtKeyUsage
+	for _, name := range names {
+		name = strings.TrimSpace(name)
+		if name == "" {
+			continue
+		}
+		v, ok := extKeyUsageNames[name]
+		if !ok {
+			return nil, fmt.Errorf("unknown extended key usage: %s", name)
+		}
+		usages = append(usages, v)
+	}
+	return usages, nil
+}
+
+func signatureAlgorithm(md string, key crypto.Signer) (x509.SignatureAlgorithm, error) {
+	switch key.(type) {
+	case *rsa.PrivateKey:
+		switch md {
+		case "sha256":
+			return x509.SHA256WithRSA, nil
+		case "sha384":
+			return x509.SHA384WithRSA, nil
+		case "sha512", "":
+			return x509.SHA512WithRSA, nil
+		}
+	case *ecdsa.PrivateKey:
+		switch md {
+		case "sha256":
+			return x509.ECDSAWithSHA256, nil
+		case "sha384":
+			return x509.ECDSAWithSHA384, nil
+		case "sha512", "":
+			return x509.ECDSAWithSHA512, nil
+		}
+	}
+	return x509.UnknownSignatureAlgorithm, fmt.Errorf("unsupported md %q for this key type", md)
+}
+
 type rootOptions struct {
 	keyOptions
+	caOptions
 	dir string
 }
 
@@ -231,10 +375,15 @@ func newRootCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().NFlag() == 0 && len(args) == 0 {
+				cmd.Help()
+				return nil
+			}
 			return runRoot(o)
 		},
 	}
 	addKeyFlags(cmd, &o.keyOptions, keyOptions{cipher: "ecc", bits: 3072, subject: defaultRootSubject, days: 3650})
+	addCAFlags(cmd, &o.caOptions, caOptions{pathlen: -1, md: "sha512", subjectKeyID: true, authorityKeyID: true})
 	cmd.Flags().StringVarP(&o.dir, "output", "o", ".", "directory to save files")
 	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpWithRootCommand() })
 	return cmd
@@ -272,20 +421,30 @@ func runRoot(o *rootOptions) error {
 		if err != nil {
 			return err
 		}
-		skid, err := subjectKeyID(key.Public())
+		usage, err := parseKeyUsage(o.keyUsage)
+		if err != nil {
+			return err
+		}
+		extUsage, err := parseExtKeyUsage(o.extKeyUsage)
+		if err != nil {
+			return err
+		}
+		sig, err := signatureAlgorithm(o.md, key)
 		if err != nil {
 			return err
 		}
 		now := time.Now()
 		tmpl := &x509.Certificate{
-			SerialNumber:          serial,
-			Subject:               parseSubject(o.subject),
-			NotBefore:             now,
-			NotAfter:              now.AddDate(0, 0, o.days),
-			BasicConstraintsValid: true,
-			IsCA:                  true,
-			SubjectKeyId:          skid,
-			SignatureAlgorithm:    sigAlg(key),
+			SerialNumber:       serial,
+			Subject:            parseSubject(o.subject),
+			NotBefore:          now,
+			NotAfter:           now.AddDate(0, 0, o.days),
+			KeyUsage:           usage,
+			ExtKeyUsage:        extUsage,
+			SignatureAlgorithm: sig,
+		}
+		if err := applyCAOptions(tmpl, &o.caOptions, key.Public()); err != nil {
+			return err
 		}
 		der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, key.Public(), key)
 		if err != nil {
@@ -312,6 +471,7 @@ func runRoot(o *rootOptions) error {
 
 type inteOptions struct {
 	keyOptions
+	caOptions
 	dir        string
 	cert       string
 	key        string
@@ -326,10 +486,15 @@ func newInteCmd() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().NFlag() == 0 && len(args) == 0 {
+				cmd.Help()
+				return nil
+			}
 			return runInte(o)
 		},
 	}
 	addKeyFlags(cmd, &o.keyOptions, keyOptions{cipher: "ecc", bits: 3072, subject: defaultInteSubject, days: 1825})
+	addCAFlags(cmd, &o.caOptions, caOptions{keyUsage: []string{"keyCertSign", "cRLSign"}, extKeyUsage: []string{"serverAuth", "clientAuth"}, pathlen: 0, md: "sha512", subjectKeyID: true, authorityKeyID: true})
 	f := cmd.Flags()
 	f.StringVarP(&o.dir, "output", "o", ".", "directory to save files")
 	f.StringVarP(&o.cert, "cert", "c", "", "intermediate certificate")
@@ -406,25 +571,36 @@ func runInte(o *inteOptions) error {
 		if err != nil {
 			return err
 		}
-		skid, err := subjectKeyID(keySigner.Public())
+		usage, err := parseKeyUsage(o.keyUsage)
+		if err != nil {
+			return err
+		}
+		extUsage, err := parseExtKeyUsage(o.extKeyUsage)
+		if err != nil {
+			return err
+		}
+		sig, err := signatureAlgorithm(o.md, parentKey)
 		if err != nil {
 			return err
 		}
 		now := time.Now()
 		tmpl := &x509.Certificate{
-			SerialNumber:          serial,
-			Subject:               parseSubject(o.subject),
-			NotBefore:             now,
-			NotAfter:              now.AddDate(0, 0, o.days),
-			BasicConstraintsValid: true,
-			IsCA:                  true,
-			MaxPathLen:            0,
-			MaxPathLenZero:        true,
-			KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
-			ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth, x509.ExtKeyUsageClientAuth},
-			SubjectKeyId:          skid,
-			AuthorityKeyId:        parentCert.SubjectKeyId,
-			SignatureAlgorithm:    sigAlg(parentKey),
+			SerialNumber:       serial,
+			Subject:            parseSubject(o.subject),
+			NotBefore:          now,
+			NotAfter:           now.AddDate(0, 0, o.days),
+			KeyUsage:           usage,
+			ExtKeyUsage:        extUsage,
+			SignatureAlgorithm: sig,
+		}
+		if err := applyCAOptions(tmpl, &o.caOptions, keySigner.Public()); err != nil {
+			return err
+		}
+		if o.authorityKeyID {
+			tmpl.AuthorityKeyId = parentCert.SubjectKeyId
+		} else {
+			// Prevent the stdlib from deriving an authority key identifier.
+			parentCert.SubjectKeyId = nil
 		}
 		der, err := x509.CreateCertificate(rand.Reader, tmpl, parentCert, keySigner.Public(), parentKey)
 		if err != nil {
@@ -626,7 +802,7 @@ func newRootCommand() *cobra.Command {
 		},
 	}
 	root.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpCommand() })
-	root.AddCommand(newRootCmd(), newInteCmd(), newCertCmd())
+	root.AddCommand(newRootCmd(), newInteCmd(), newCertCmd(), newDBCmd())
 	return root
 }
 
@@ -638,6 +814,7 @@ SubCommand:
 	inte  Create Intermediate Certificate
 	cert  Create Domain Name Certificate
 	sign  Same as cert
+	db    Manage the certificate database
 	help  Show this help text
 `, progName)
 }
@@ -652,6 +829,12 @@ Options:
 	-o                Set the file save directory(Default: .)
 	--days            Set the expiration time(Default: 3650)
 	-s, -subject      Set Subject Information(Default: "/C=CN/O=Test SSL/CN=Test SSL CA")
+	--key-usage       Set key usage extension, comma separated(Default: empty)
+	--ext-key-usage   Set extended key usage extension, comma separated(Default: empty)
+	--pathlen         Set CA path length, -1 for unset(Default: -1)
+	--md              Set signature hash algorithm(Default: sha512)
+	--subject-key-id  Include subject key identifier(Default: true)
+	--authority-key-id Include authority key identifier(Default: true)
 `, progName)
 }
 
@@ -667,6 +850,12 @@ Options:
 	-k, --key         Set Intermediate Certificate Key
 	--days            Set the expiration time(Default: 1825)
 	-s, -subject      Set Subject Information(Default: "/C=CN/O=Test SSL/CN=Test Inte CA")
+	--key-usage       Set key usage extension, comma separated(Default: "keyCertSign,cRLSign")
+	--ext-key-usage   Set extended key usage extension, comma separated(Default: "serverAuth,clientAuth")
+	--pathlen         Set CA path length, -1 for unset(Default: 0)
+	--md              Set signature hash algorithm(Default: sha512)
+	--subject-key-id  Include subject key identifier(Default: true)
+	--authority-key-id Include authority key identifier(Default: true)
 `, progName)
 }
 

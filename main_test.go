@@ -50,6 +50,70 @@ func TestChain(t *testing.T) {
 	}
 }
 
+func TestRevokeCRL(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca")
+	exec(t, "root", "-o", ca)
+	exec(t, "inte", "-o", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"))
+	exec(t, "cert", "-D", ca, "-d", "example.com", "-d", "www.example.com")
+
+	exec(t, "db", "revoke", "example.com", "-D", ca)
+	crl := loadCRL(t, filepath.Join(ca, "crl", "InteCA.crl"))
+	if len(crl.RevokedCertificateEntries) != 1 {
+		t.Fatalf("expected 1 revoked entry, got %d", len(crl.RevokedCertificateEntries))
+	}
+	block, _ := pem.Decode(mustRead(t, filepath.Join(ca, "InteCA.cer")))
+	issuer, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := crl.CheckSignatureFrom(issuer); err != nil {
+		t.Fatalf("CRL signature invalid: %v", err)
+	}
+
+	exec(t, "db", "unrevoke", "example.com", "-D", ca)
+	if crl = loadCRL(t, filepath.Join(ca, "crl", "InteCA.crl")); len(crl.RevokedCertificateEntries) != 0 {
+		t.Fatalf("expected 0 revoked entries after unrevoke, got %d", len(crl.RevokedCertificateEntries))
+	}
+}
+
+func TestNoSubjectKeyID(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca")
+	exec(t, "root", "-o", ca, "--subject-key-id=false")
+	block, _ := pem.Decode(mustRead(t, filepath.Join(ca, "RootCA.cer")))
+	cert, err := x509.ParseCertificate(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cert.SubjectKeyId) != 0 {
+		t.Fatalf("expected no subject key id, got %x", cert.SubjectKeyId)
+	}
+	if !cert.IsCA {
+		t.Fatal("expected CA certificate")
+	}
+}
+
+func loadCRL(t *testing.T, path string) *x509.RevocationList {
+	t.Helper()
+	block, _ := pem.Decode(mustRead(t, path))
+	if block == nil {
+		t.Fatalf("failed to decode CRL: %s", path)
+	}
+	crl, err := x509.ParseRevocationList(block.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return crl
+}
+
+func mustRead(t *testing.T, path string) []byte {
+	t.Helper()
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return data
+}
+
 func exec(t *testing.T, args ...string) {
 	t.Helper()
 	cmd := newRootCommand()
