@@ -63,6 +63,6 @@ func newCLI() *cobra.Command {
 	}
 	root.PersistentFlags().StringVar(&logLevel, "log-level", "info", "log level (trace, debug, info, warn, error, fatal, panic)")
 	root.PersistentFlags().BoolVar(&legacyMode, "legacy", false, "read the deprecated xcert.sh serial and index.txt files")
-	root.AddCommand(newRootCommand(), newInteCommand(), newCertCommand(), newDBCommand())
+	root.AddCommand(newRootCommand(), newInteCommand(), newCertCommand(), newInfoCommand(), newDBCommand())
 	return root
 }

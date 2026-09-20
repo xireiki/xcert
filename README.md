@@ -66,6 +66,7 @@ xcert cert -D ./ca -d example.com -d www.example.com
 ```sh
 xcert db list -D ./ca
 xcert db show example.com -D ./ca
+xcert info -f ./ca/certs/example.com_ecc/example.com.cer
 ```
 
 吊销证书并生成 CRL：
@@ -85,6 +86,7 @@ xcert <子命令> [参数]
 | `root` | 创建根证书 |
 | `inte` | 创建中间证书，需由根证书或上级 CA 签发 |
 | `cert` | 创建域名证书，由中间证书签发 |
+| `info` | 查看证书文件详情 |
 | `db` | 管理证书数据库 |
 | `help` | 显示帮助信息 |
 
@@ -106,6 +108,7 @@ xcert <子命令> [参数]
 ### 帮助行为
 
 - `root`、`inte` 与 `cert` 子命令在不带任何参数执行时会直接输出该子命令的帮助信息，而不会执行操作。只要指定了任意参数（含任意选项），即按参数执行。
+- `info` 子命令不带 `-f` / `--file` 时会报错。
 - `db` 子命令不带参数执行时显示其帮助信息；其子命令中需要参数的（如 `show`、`delete`、`revoke`）缺少参数时会报错。
 
 ### 日志
@@ -303,6 +306,21 @@ xcert <子命令> [参数]
 | `<CN>.csr` | 证书请求，包含与证书一致的 `subjectAltName`；使用 `--csr` 时为外部请求的副本 |
 | `<CN>.cer` | 域名证书 |
 | `fullchain.cer` | 域名证书与证书链拼接的完整链 |
+
+## info：查看证书详情
+
+`xcert info -f <证书文件>` 读取指定证书文件并打印详细信息，不依赖数据库，根证书、中间证书与叶证书均适用。
+
+### 参数
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `-f`, `--file` | 无（必填） | 要查看的证书文件 |
+| `-h`, `--help` | | 显示帮助 |
+
+### 输出字段
+
+`File`、`Subject`、`Issuer`、`Serial`、`Version`、`NotBefore`、`NotAfter`、`IsCA`、`PathLength`（仅 CA）、`KeyUsage`、`ExtKeyUsage`、`DNSNames`、`PublicKey`、`Signature`、`SubjectKeyId`、`AuthorityKeyId`（存在时）与 `SHA256` 指纹。
 
 ## db：管理证书数据库
 

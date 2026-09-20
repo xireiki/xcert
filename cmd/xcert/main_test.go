@@ -9,6 +9,7 @@ import (
 	"encoding/pem"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/xireiki/xcert/store"
@@ -192,6 +193,24 @@ func TestNoSubjectKeyID(t *testing.T) {
 	}
 	if !cert.IsCA {
 		t.Fatal("expected CA certificate")
+	}
+}
+
+func TestInfo(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca")
+	exec(t, "root", "-D", ca)
+	certPath := filepath.Join(ca, "RootCA.cer")
+
+	cmd := newCLI()
+	out := &strings.Builder{}
+	cmd.SetOut(out)
+	cmd.SetArgs([]string{"info", "-f", certPath})
+	if err := cmd.Execute(); err != nil {
+		t.Fatal(err)
+	}
+	text := out.String()
+	if !strings.Contains(text, "Subject:") || !strings.Contains(text, "IsCA:          true") {
+		t.Fatalf("unexpected info output:\n%s", text)
 	}
 }
 
