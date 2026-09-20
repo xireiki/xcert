@@ -10,8 +10,8 @@ import (
 
 func TestChain(t *testing.T) {
 	ca := filepath.Join(t.TempDir(), "ca")
-	exec(t, "root", "-o", ca)
-	exec(t, "inte", "-o", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"))
+	exec(t, "root", "-D", ca)
+	exec(t, "inte", "-D", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"))
 	exec(t, "cert", "-D", ca, "-d", "example.com", "-d", "www.example.com")
 
 	roots := x509.NewCertPool()
@@ -52,8 +52,8 @@ func TestChain(t *testing.T) {
 
 func TestRevokeCRL(t *testing.T) {
 	ca := filepath.Join(t.TempDir(), "ca")
-	exec(t, "root", "-o", ca)
-	exec(t, "inte", "-o", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"))
+	exec(t, "root", "-D", ca)
+	exec(t, "inte", "-D", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"))
 	exec(t, "cert", "-D", ca, "-d", "example.com", "-d", "www.example.com")
 
 	exec(t, "db", "revoke", "example.com", "-D", ca)
@@ -78,7 +78,7 @@ func TestRevokeCRL(t *testing.T) {
 
 func TestNoSubjectKeyID(t *testing.T) {
 	ca := filepath.Join(t.TempDir(), "ca")
-	exec(t, "root", "-o", ca, "--subject-key-id=false")
+	exec(t, "root", "-D", ca, "--subject-key-id=false")
 	block, _ := pem.Decode(mustRead(t, filepath.Join(ca, "RootCA.cer")))
 	cert, err := x509.ParseCertificate(block.Bytes)
 	if err != nil {

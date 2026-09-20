@@ -35,8 +35,8 @@ go test ./...
 创建一个完整的证书链（根 CA、中间 CA、域名证书）：
 
 ```sh
-xcert root -o ./ca
-xcert inte -o ./ca -c ./ca/RootCA.cer -k ./ca/RootCA.key
+xcert root -D ./ca
+xcert inte -D ./ca -c ./ca/RootCA.cer -k ./ca/RootCA.key
 xcert cert -D ./ca -d example.com -d www.example.com
 ```
 
@@ -98,7 +98,7 @@ xcert <子命令> [参数]
 
 ### 主体信息格式
 
-`-s` / `--subject` / `--subj` 使用 OpenSSL 风格的主体字符串，以 `/` 分隔各字段，例如：
+`-s` / `--subject` 使用 OpenSSL 风格的主体字符串，以 `/` 分隔各字段，例如：
 
 ```
 /C=CN/O=Test SSL/CN=Test SSL CA
@@ -125,14 +125,14 @@ xcert <子命令> [参数]
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa`。其他取值会报错 |
-| `--rsa-bit-number` | `3072` | 生成 RSA 私钥时的位数，仅在 `--cipher rsa` 时生效，最小 512 |
-| `-s`, `--subject`, `--subj` | `/C=CN/O=Test SSL/CN=Test SSL CA` | 证书主体信息 |
+| `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数，仅在 `--cipher rsa` 时生效，最小 512 |
+| `-s`, `--subject` | `/C=CN/O=Test SSL/CN=Test SSL CA` | 证书主体信息 |
 | `--days` | `3650` | 证书有效期，单位为天 |
-| `-o`, `--output` | `.` | 文件保存目录 |
+| `-D`, `--dir` | `.` | 文件保存目录 |
 | `--key-usage` | 空 | 密钥用法扩展，逗号分隔，多个值取并集 |
 | `--ext-key-usage` | 空 | 扩展密钥用法，逗号分隔 |
-| `--pathlen` | `-1` | CA 路径长度限制，`-1` 表示不设置该限制 |
-| `--md` | `sha512` | 签名摘要算法，可选 `sha256`、`sha384`、`sha512` |
+| `--path-length` | `-1` | CA 路径长度限制，`-1` 表示不设置该限制 |
+| `--digest` | `sha512` | 签名摘要算法，可选 `sha256`、`sha384`、`sha512` |
 | `--subject-key-id` | `true` | 是否包含主体密钥标识符（SKI） |
 | `--authority-key-id` | `true` | 是否包含颁发者密钥标识符（AKI）。根证书为自签，默认不会附带 AKI，该参数对根证书无实际作用 |
 | `-h`, `--help` | | 显示帮助 |
@@ -140,10 +140,10 @@ xcert <子命令> [参数]
 ### 行为
 
 - 若目标目录下已存在 `RootCA.cer`，输出 `RootCA.cer` 已存在的警告并直接返回，不覆盖。
-- 创建目录及 `<output>/newcerts`、`<output>/crl`。
-- 若 `<output>/RootCA.key` 不存在，则按 `--cipher` 生成私钥。
-- 生成自签根证书 `RootCA.cer`，签名摘要算法由 `--md` 决定。
-- 将根证书记录写入 `<output>/xcert.db`，类型为 `root`，名称为 `RootCA`。
+- 创建目录及 `<dir>/newcerts`、`<dir>/crl`。
+- 若 `<dir>/RootCA.key` 不存在，则按 `--cipher` 生成私钥。
+- 生成自签根证书 `RootCA.cer`，签名摘要算法由 `--digest` 决定。
+- 将根证书记录写入 `<dir>/xcert.db`，类型为 `root`，名称为 `RootCA`。
 - 根证书使用随机序列号（128 位）。
 
 根证书默认不包含 `keyUsage` 与 `extendedKeyUsage` 扩展，`basicConstraints` 为 `CA:TRUE`。默认包含 SKI。
@@ -165,17 +165,17 @@ xcert <子命令> [参数]
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa` |
-| `--rsa-bit-number` | `3072` | 生成 RSA 私钥时的位数 |
-| `-s`, `--subject`, `--subj` | `/C=CN/O=Test SSL/CN=Test Inte CA` | 证书主体信息 |
+| `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数 |
+| `-s`, `--subject` | `/C=CN/O=Test SSL/CN=Test Inte CA` | 证书主体信息 |
 | `--days` | `1825` | 证书有效期，单位为天 |
-| `-o`, `--output` | `.` | 文件保存目录 |
+| `-D`, `--dir` | `.` | 文件保存目录 |
 | `-c`, `--cert` | 无，必填 | 签发中间证书的上级 CA 证书路径 |
 | `-k`, `--key` | 无，必填 | 签发中间证书的上级 CA 私钥路径 |
-| `-R`, `--rand-serial` | `false` | 使用随机序列号，不占用数据库递增计数器 |
+| `-R`, `--random-serial` | `false` | 使用随机序列号，不占用数据库递增计数器 |
 | `--key-usage` | `keyCertSign,cRLSign` | 密钥用法扩展 |
 | `--ext-key-usage` | `serverAuth,clientAuth` | 扩展密钥用法 |
-| `--pathlen` | `0` | CA 路径长度限制，`-1` 表示不设置 |
-| `--md` | `sha512` | 签名摘要算法 |
+| `--path-length` | `0` | CA 路径长度限制，`-1` 表示不设置 |
+| `--digest` | `sha512` | 签名摘要算法 |
 | `--subject-key-id` | `true` | 是否包含 SKI |
 | `--authority-key-id` | `true` | 是否包含 AKI |
 | `-h`, `--help` | | 显示帮助 |
@@ -184,8 +184,8 @@ xcert <子命令> [参数]
 
 - 若目标目录下已存在 `InteCA.cer`，输出已存在的警告并直接返回，不覆盖。
 - `-c` 与 `-k` 为必填项，缺失或文件不存在时报错。
-- 创建目录及 `<output>/newcerts`、`<output>/crl`、`<output>/certs`。
-- 若 `<output>/InteCA.key` 不存在，则按 `--cipher` 生成私钥。
+- 创建目录及 `<dir>/newcerts`、`<dir>/crl`、`<dir>/certs`。
+- 若 `<dir>/InteCA.key` 不存在，则按 `--cipher` 生成私钥。
 - 生成证书请求 `InteCA.csr`（若不存在）。
 - 使用上级 CA 证书与私钥签发 `InteCA.cer`。
 - 生成证书链 `chain.cer`，内容为 `InteCA.cer` 与上级 CA 证书的拼接。
@@ -214,18 +214,16 @@ xcert <子命令> [参数]
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa` |
-| `--rsa-bit-number` | `3072` | 生成 RSA 私钥时的位数 |
-| `-s`, `--subject`, `--subj` | `/C=CN` | 证书主体信息 |
+| `--rsa-bits` | `3072` | 生成 RSA 私钥时的位数 |
+| `-s`, `--subject` | `/C=CN` | 证书主体信息 |
 | `--days` | `90` | 证书有效期，单位为天 |
 | `-D`, `--dir` | `.` | CA 目录，用于定位数据库、CA 证书、CA 私钥与证书链 |
 | `-c`, `--cert` | `<dir>/InteCA.cer` | 签发证书所用的 CA 证书 |
 | `-k`, `--key` | `<dir>/InteCA.key` | 签发证书所用的 CA 私钥 |
 | `--chain` | `<dir>/chain.cer` | 用于拼接 `fullchain.cer` 的证书链 |
 | `-d`, `--domain` | 无 | 域名，可重复指定 |
-| `-R`, `--rand-serial` | `false` | 使用随机序列号，不占用数据库递增计数器 |
+| `-R`, `--random-serial` | `false` | 使用随机序列号，不占用数据库递增计数器 |
 | `-h`, `--help` | | 显示帮助 |
-
-注意：`cert` 命令使用 `-D` / `--dir` 指定 CA 目录。其帮助文本仍保留历史遗留的 `-o` 行，该选项在当前 `cert` 命令中不接受。
 
 ### 名称与 SAN 规则
 
@@ -313,7 +311,7 @@ xcert <子命令> [参数]
 | `--ca-cert` | `<dir>/InteCA.cer` | 用于签发 CRL 的 CA 证书 |
 | `--ca-key` | `<dir>/InteCA.key` | 用于签发 CRL 的 CA 私钥 |
 | `--crl` | `<dir>/crl/<CA 文件名>.crl` | CRL 输出路径 |
-| `--days` | `30` | CRL 的 `nextUpdate` 相对于当前时间的天数 |
+| `--crl-days` | `30` | CRL 的 `nextUpdate` 相对于当前时间的天数 |
 
 `revoke` 会先将匹配记录的状态更新为 `R` 并记录吊销时间，然后重新生成 CRL；`unrevoke` 会先将状态恢复为 `V` 并清除吊销时间，然后重新生成 CRL。若 CRL 签发所需的 CA 证书或私钥不存在，命令会报错，此时状态修改已生效。
 
@@ -325,7 +323,7 @@ CRL 使用 `X509 CRL` PEM 格式，CRL 编号来自数据库 `meta` 表中的独
 
 ## 证书能力参数详解
 
-`--key-usage`、`--ext-key-usage`、`--pathlen`、`--md`、`--subject-key-id`、`--authority-key-id` 仅 `root` 与 `inte` 支持。
+`--key-usage`、`--ext-key-usage`、`--path-length`、`--digest`、`--subject-key-id`、`--authority-key-id` 仅 `root` 与 `inte` 支持。
 
 ### --key-usage
 
@@ -364,11 +362,11 @@ CRL 使用 `X509 CRL` PEM 格式，CRL 编号来自数据库 `meta` 表中的独
 
 未识别的取值会报错。
 
-### --pathlen
+### --path-length
 
 CA 路径长度限制。取值 `-1` 表示不写入路径长度限制；`0` 表示只允许签发终端证书，不允许再签发下级 CA；大于 `0` 表示允许的下级 CA 层级数。
 
-### --md
+### --digest
 
 签名摘要算法，可选 `sha256`、`sha384`、`sha512`。会根据密钥类型自动选择对应算法（RSA 使用 RSASSA-PKCS1-v1_5，ECC 使用 ECDSA）。
 
@@ -392,7 +390,7 @@ Go 标准库在生成 CA 证书时会强制加入 SKI，并在由上级 CA 签�
 
 ## 目录结构示例
 
-执行 `xcert root -o ./ca`、`xcert inte -o ./ca -c ./ca/RootCA.cer -k ./ca/RootCA.key`、`xcert cert -D ./ca -d example.com -d www.example.com` 后，目录结构如下：
+执行 `xcert root -D ./ca`、`xcert inte -D ./ca -c ./ca/RootCA.cer -k ./ca/RootCA.key`、`xcert cert -D ./ca -d example.com -d www.example.com` 后，目录结构如下：
 
 ```
 ca
@@ -442,7 +440,7 @@ ca
 | `created_at` | TEXT | 记录创建时间，RFC 3339 |
 | `revoked_at` | TEXT | 吊销时间，RFC 3339，未吊销为空 |
 
-序列号计数器 `serial` 初始为 `01`，每签发一张中间证书或域名证书后递增；`root` 始终使用随机序列号，不占用该计数器。使用 `-R` / `--rand-serial` 时同样使用随机序列号且不递增计数器。CRL 编号使用独立的 `crl` 计数器。
+序列号计数器 `serial` 初始为 `01`，每签发一张中间证书或域名证书后递增；`root` 始终使用随机序列号，不占用该计数器。使用 `-R` / `--random-serial` 时同样使用随机序列号且不递增计数器。CRL 编号使用独立的 `crl` 计数器。
 
 ## 与旧版 shell 脚本的差异
 
@@ -451,6 +449,7 @@ ca
 - 新增 `db` 子命令与 CRL 生成能力。
 - 新增证书能力参数。
 - `cert` 命令的 CA 证书、私钥与证书链默认路径会随 `-D` / `--dir` 一起变化。
+- 参数统一为 GNU kebab-case 风格：CA 目录统一为 `-D` / `--dir`；`-o` / `--output`、`--subj`、`--rsa-bit-number`、`--pathlen`、`--md`、`--rand-serial`、CRL 的 `--days` 分别更名为 `-D` / `--dir`、`--subject`、`--rsa-bits`、`--path-length`、`--digest`、`--random-serial`、`--crl-days`。
 
 ## 许可证
 

@@ -133,10 +133,10 @@ func dbDeleteCmd(dir *string) *cobra.Command {
 }
 
 type crlOptions struct {
-	caCert string
-	caKey  string
-	crl    string
-	days   int
+	caCert  string
+	caKey   string
+	crl     string
+	crlDays int
 }
 
 func addCRLFlags(cmd *cobra.Command, o *crlOptions) {
@@ -144,7 +144,7 @@ func addCRLFlags(cmd *cobra.Command, o *crlOptions) {
 	f.StringVar(&o.caCert, "ca-cert", "", "CA certificate used to sign the CRL")
 	f.StringVar(&o.caKey, "ca-key", "", "CA private key used to sign the CRL")
 	f.StringVar(&o.crl, "crl", "", "output CRL file")
-	f.IntVar(&o.days, "days", 30, "CRL validity in days")
+	f.IntVar(&o.crlDays, "crl-days", 30, "CRL validity in days")
 }
 
 func dbRevokeCmd(dir *string) *cobra.Command {
@@ -237,7 +237,7 @@ func writeCRL(dir string, o *crlOptions, st *store) error {
 	tmpl := &x509.RevocationList{
 		Number:             number,
 		ThisUpdate:         now,
-		NextUpdate:         now.AddDate(0, 0, o.days),
+		NextUpdate:         now.AddDate(0, 0, o.crlDays),
 		SignatureAlgorithm: sigAlg(key),
 	}
 	for _, e := range entries {

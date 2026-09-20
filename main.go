@@ -212,17 +212,16 @@ type keyOptions struct {
 func addKeyFlags(cmd *cobra.Command, o *keyOptions, defaults keyOptions) {
 	f := cmd.Flags()
 	f.StringVarP(&o.cipher, "cipher", "C", defaults.cipher, "encryption method for the private key")
-	f.IntVar(&o.bits, "rsa-bit-number", defaults.bits, "key length for RSA private keys")
+	f.IntVar(&o.bits, "rsa-bits", defaults.bits, "key length for RSA private keys")
 	f.StringVarP(&o.subject, "subject", "s", defaults.subject, "subject information")
-	f.StringVar(&o.subject, "subj", defaults.subject, "subject information")
 	f.IntVar(&o.days, "days", defaults.days, "expiration time in days")
 }
 
 type caOptions struct {
 	keyUsage       []string
 	extKeyUsage    []string
-	pathlen        int
-	md             string
+	pathLength     int
+	digest         string
 	subjectKeyID   bool
 	authorityKeyID bool
 }
@@ -231,8 +230,8 @@ func addCAFlags(cmd *cobra.Command, o *caOptions, defaults caOptions) {
 	f := cmd.Flags()
 	f.StringSliceVar(&o.keyUsage, "key-usage", defaults.keyUsage, "key usage extension (comma separated)")
 	f.StringSliceVar(&o.extKeyUsage, "ext-key-usage", defaults.extKeyUsage, "extended key usage extension (comma separated)")
-	f.IntVar(&o.pathlen, "pathlen", defaults.pathlen, "CA path length, -1 for unset")
-	f.StringVar(&o.md, "md", defaults.md, "signature hash algorithm (sha256, sha384, sha512)")
+	f.IntVar(&o.pathLength, "path-length", defaults.pathLength, "CA path length, -1 for unset")
+	f.StringVar(&o.digest, "digest", defaults.digest, "signature digest algorithm (sha256, sha384, sha512)")
 	f.BoolVar(&o.subjectKeyID, "subject-key-id", defaults.subjectKeyID, "include subject key identifier")
 	f.BoolVar(&o.authorityKeyID, "authority-key-id", defaults.authorityKeyID, "include authority key identifier")
 }
@@ -243,9 +242,9 @@ func applyCAOptions(tmpl *x509.Certificate, o *caOptions, publicKey crypto.Publi
 	if o.subjectKeyID {
 		tmpl.IsCA = true
 		tmpl.BasicConstraintsValid = true
-		if o.pathlen >= 0 {
-			tmpl.MaxPathLen = o.pathlen
-			tmpl.MaxPathLenZero = o.pathlen == 0
+		if o.pathLength >= 0 {
+			tmpl.MaxPathLen = o.pathLength
+			tmpl.MaxPathLenZero = o.pathLength == 0
 		}
 		skid, err := subjectKeyID(publicKey)
 		if err != nil {
@@ -256,7 +255,7 @@ func applyCAOptions(tmpl *x509.Certificate, o *caOptions, publicKey crypto.Publi
 	}
 	// Keep IsCA false so the stdlib does not force a subject key identifier,
 	// then encode basicConstraints ourselves.
-	if o.pathlen < 0 {
+	if o.pathLength < 0 {
 		value, err := asn1.Marshal(struct {
 			IsCA bool `asn1:"optional"`
 		}{true})
@@ -269,7 +268,7 @@ func applyCAOptions(tmpl *x509.Certificate, o *caOptions, publicKey crypto.Publi
 	value, err := asn1.Marshal(struct {
 		IsCA       bool `asn1:"optional"`
 		MaxPathLen int
-	}{true, o.pathlen})
+	}{true, o.pathLength})
 	if err != nil {
 		return err
 	}
@@ -383,8 +382,8 @@ func newRootCmd() *cobra.Command {
 		},
 	}
 	addKeyFlags(cmd, &o.keyOptions, keyOptions{cipher: "ecc", bits: 3072, subject: defaultRootSubject, days: 3650})
-	addCAFlags(cmd, &o.caOptions, caOptions{pathlen: -1, md: "sha512", subjectKeyID: true, authorityKeyID: true})
-	cmd.Flags().StringVarP(&o.dir, "output", "o", ".", "directory to save files")
+	addCAFlags(cmd, &o.caOptions, caOptions{pathLength: -1, digest: "sha512", subjectKeyID: true, authorityKeyID: true})
+	cmd.Flags().StringVarP(&o.dir, "dir", "D", ".", "certificate directory")
 	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpWithRootCommand() })
 	return cmd
 }
@@ -429,7 +428,7 @@ func runRoot(o *rootOptions) error {
 		if err != nil {
 			return err
 		}
-		sig, err := signatureAlgorithm(o.md, key)
+		sig, err := signatureAlgorithm(o.digest, key)
 		if err != nil {
 			return err
 		}
@@ -494,12 +493,12 @@ func newInteCmd() *cobra.Command {
 		},
 	}
 	addKeyFlags(cmd, &o.keyOptions, keyOptions{cipher: "ecc", bits: 3072, subject: defaultInteSubject, days: 1825})
-	addCAFlags(cmd, &o.caOptions, caOptions{keyUsage: []string{"keyCertSign", "cRLSign"}, extKeyUsage: []string{"serverAuth", "clientAuth"}, pathlen: 0, md: "sha512", subjectKeyID: true, authorityKeyID: true})
+	addCAFlags(cmd, &o.caOptions, caOptions{keyUsage: []string{"keyCertSign", "cRLSign"}, extKeyUsage: []string{"serverAuth", "clientAuth"}, pathLength: 0, digest: "sha512", subjectKeyID: true, authorityKeyID: true})
 	f := cmd.Flags()
-	f.StringVarP(&o.dir, "output", "o", ".", "directory to save files")
+	f.StringVarP(&o.dir, "dir", "D", ".", "certificate directory")
 	f.StringVarP(&o.cert, "cert", "c", "", "intermediate certificate")
 	f.StringVarP(&o.key, "key", "k", "", "intermediate certificate key")
-	f.BoolVarP(&o.randSerial, "rand-serial", "R", false, "use a random serial number")
+	f.BoolVarP(&o.randSerial, "random-serial", "R", false, "use a random serial number")
 	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpWithInteCommand() })
 	return cmd
 }
@@ -579,7 +578,7 @@ func runInte(o *inteOptions) error {
 		if err != nil {
 			return err
 		}
-		sig, err := signatureAlgorithm(o.md, parentKey)
+		sig, err := signatureAlgorithm(o.digest, parentKey)
 		if err != nil {
 			return err
 		}
@@ -657,7 +656,7 @@ func newCertCmd() *cobra.Command {
 	f.StringVarP(&o.key, "key", "k", "", "signing certificate key")
 	f.StringVar(&o.chain, "chain", "", "certificate chain")
 	f.StringArrayVarP(&o.domains, "domain", "d", nil, "domain name")
-	f.BoolVarP(&o.randSerial, "rand-serial", "R", false, "use a random serial number")
+	f.BoolVarP(&o.randSerial, "random-serial", "R", false, "use a random serial number")
 	cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) { helpWithCertCommand() })
 	return cmd
 }
@@ -823,18 +822,18 @@ func helpWithRootCommand() {
 	fmt.Printf(`Usage: %s root Options
 
 Options:
-	-h, --help        Show this help text
-	-C, --cipher      Sets the encryption method used when generating the private key(Default: ecc)
-	--rsa-bit-number  Sets the key length when generating the RSA private key
-	-o                Set the file save directory(Default: .)
-	--days            Set the expiration time(Default: 3650)
-	-s, -subject      Set Subject Information(Default: "/C=CN/O=Test SSL/CN=Test SSL CA")
-	--key-usage       Set key usage extension, comma separated(Default: empty)
-	--ext-key-usage   Set extended key usage extension, comma separated(Default: empty)
-	--pathlen         Set CA path length, -1 for unset(Default: -1)
-	--md              Set signature hash algorithm(Default: sha512)
-	--subject-key-id  Include subject key identifier(Default: true)
-	--authority-key-id Include authority key identifier(Default: true)
+	-h, --help          Show this help text
+	-C, --cipher        Set the encryption method used when generating the private key(Default: ecc)
+	--rsa-bits          Set the key length when generating the RSA private key(Default: 3072)
+	-s, --subject       Set subject information(Default: "/C=CN/O=Test SSL/CN=Test SSL CA")
+	--days              Set the expiration time(Default: 3650)
+	-D, --dir           Set the file save directory(Default: .)
+	--key-usage         Set key usage extension, comma separated(Default: empty)
+	--ext-key-usage     Set extended key usage extension, comma separated(Default: empty)
+	--path-length       Set CA path length, -1 for unset(Default: -1)
+	--digest            Set signature digest algorithm(Default: sha512)
+	--subject-key-id    Include subject key identifier(Default: true)
+	--authority-key-id  Include authority key identifier(Default: true)
 `, progName)
 }
 
@@ -842,20 +841,21 @@ func helpWithInteCommand() {
 	fmt.Printf(`Usage: %s inte Options
 
 Options:
-	-h, --help        Show this help text
-	-C, --cipher      Sets the encryption method used when generating the private key(Default: ecc)
-	--rsa-bit-number  Sets the key length when generating the RSA private key
-	-o                Set the file save directory(Default: .)
-	-c, --cert        Set Intermediate Certificate
-	-k, --key         Set Intermediate Certificate Key
-	--days            Set the expiration time(Default: 1825)
-	-s, -subject      Set Subject Information(Default: "/C=CN/O=Test SSL/CN=Test Inte CA")
-	--key-usage       Set key usage extension, comma separated(Default: "keyCertSign,cRLSign")
-	--ext-key-usage   Set extended key usage extension, comma separated(Default: "serverAuth,clientAuth")
-	--pathlen         Set CA path length, -1 for unset(Default: 0)
-	--md              Set signature hash algorithm(Default: sha512)
-	--subject-key-id  Include subject key identifier(Default: true)
-	--authority-key-id Include authority key identifier(Default: true)
+	-h, --help          Show this help text
+	-C, --cipher        Set the encryption method used when generating the private key(Default: ecc)
+	--rsa-bits          Set the key length when generating the RSA private key(Default: 3072)
+	-s, --subject       Set subject information(Default: "/C=CN/O=Test SSL/CN=Test Inte CA")
+	--days              Set the expiration time(Default: 1825)
+	-D, --dir           Set the file save directory(Default: .)
+	-c, --cert          Set intermediate certificate
+	-k, --key           Set intermediate certificate key
+	-R, --random-serial Use a random serial number
+	--key-usage         Set key usage extension, comma separated(Default: "keyCertSign,cRLSign")
+	--ext-key-usage     Set extended key usage extension, comma separated(Default: "serverAuth,clientAuth")
+	--path-length       Set CA path length, -1 for unset(Default: 0)
+	--digest            Set signature digest algorithm(Default: sha512)
+	--subject-key-id    Include subject key identifier(Default: true)
+	--authority-key-id  Include authority key identifier(Default: true)
 `, progName)
 }
 
@@ -863,16 +863,17 @@ func helpWithCertCommand() {
 	fmt.Printf(`Usage: %s cert|sign Options
 
 Options:
-	-h, --help        Show this help text
-	-C, --cipher      Sets the encryption method used when generating the private key(Default: ecc)
-	--rsa-bit-number  Sets the key length when generating the RSA private key
-	-o                Set the file save directory(Default: <CertDir>/certs/<Domain>_<Type>)
-	-D                Set up the certificate directory(Default: .)
-	-c, --cert        Set Certificate(Default: <CertDir>/InteCA.cer)
-	-k, --key         Set Certificate Key(Default: <CertDir>/InteCA.key)
-	--chain           Set up a certificate chain(Default: <CertDir>/chain.cer)
-	--days            Set the expiration time(Default: 90)
-	-s, -subject      Set Subject Information(Default: "/C=CN")
+	-h, --help          Show this help text
+	-C, --cipher        Set the encryption method used when generating the private key(Default: ecc)
+	--rsa-bits          Set the key length when generating the RSA private key(Default: 3072)
+	-s, --subject       Set subject information(Default: "/C=CN")
+	--days              Set the expiration time(Default: 90)
+	-D, --dir           Set up the certificate directory(Default: .)
+	-c, --cert          Set certificate(Default: <dir>/InteCA.cer)
+	-k, --key           Set certificate key(Default: <dir>/InteCA.key)
+	--chain             Set up a certificate chain(Default: <dir>/chain.cer)
+	-d, --domain        Set a domain name, repeatable
+	-R, --random-serial Use a random serial number
 `, progName)
 }
 
