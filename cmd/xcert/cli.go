@@ -22,6 +22,10 @@ var progName = filepath.Base(os.Args[0])
 var legacyMode bool
 
 func openStore(dir string) (*store.Store, error) {
+	dir, err := filepath.Abs(dir)
+	if err != nil {
+		return nil, err
+	}
 	st, err := store.Open(filepath.Join(dir, store.FileName))
 	if err != nil {
 		return nil, err

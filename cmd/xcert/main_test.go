@@ -344,6 +344,23 @@ func TestRevokeCARejected(t *testing.T) {
 	}
 }
 
+func TestDeleteLeafWithoutCert(t *testing.T) {
+	ca := filepath.Join(t.TempDir(), "ca")
+	exec(t, "root", "-D", ca)
+	exec(t, "inte", "-D", ca, "-c", filepath.Join(ca, "RootCA.cer"), "-k", filepath.Join(ca, "RootCA.key"))
+	exec(t, "cert", "-D", ca, "-d", "two.example.com")
+	dir := filepath.Join(ca, "certs", "two.example.com_ecc")
+	if err := os.Remove(filepath.Join(dir, "two.example.com.cer")); err != nil {
+		t.Fatal(err)
+	}
+	exec(t, "db", "delete", "two.example.com", "-D", ca)
+	for _, name := range []string{"two.example.com.key", "two.example.com.csr", "fullchain.cer"} {
+		if _, err := os.Stat(filepath.Join(dir, name)); !os.IsNotExist(err) {
+			t.Fatalf("expected %s to be removed, got err=%v", name, err)
+		}
+	}
+}
+
 func exec(t *testing.T, args ...string) {
 	t.Helper()
 	if err := execErr(args...); err != nil {

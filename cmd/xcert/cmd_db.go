@@ -239,10 +239,15 @@ func removeRecordFiles(record store.Record) {
 	if record.CertPath == "" {
 		return
 	}
-	// Only delete artifacts of real leaf certificates; a CA record must never
-	// lose its certificate and key through "db delete".
+	// Keep the files of real CA certificates. If the certificate cannot be
+	// loaded, fall back to the recorded type so the private key of a leaf is
+	// still cleaned up when its .cer is already gone.
 	cert, err := pki.LoadCert(record.CertPath)
-	if err != nil || cert.IsCA {
+	if err == nil && cert.IsCA {
+		return
+	}
+	if err != nil && record.Type != "cert" {
+		log.Warn("cannot verify %s is a leaf certificate, keeping its files: %v", record.CertPath, err)
 		return
 	}
 	dir := filepath.Dir(record.CertPath)
@@ -333,6 +338,10 @@ func runSetStatus(dir, selector, status string, crlOptions *option.CRLOptions) e
 
 func writeCRL(dir string, o *option.CRLOptions, st *store.Store) error {
 	if err := validateDays("--crl-days", o.Days); err != nil {
+		return err
+	}
+	dir, err := filepath.Abs(dir)
+	if err != nil {
 		return err
 	}
 	caCert := o.CACert
