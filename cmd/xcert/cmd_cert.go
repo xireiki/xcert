@@ -35,6 +35,9 @@ func newCertCommand() *cobra.Command {
 		SilenceUsage:  true,
 		SilenceErrors: true,
 		RunE: func(cmd *cobra.Command, args []string) error {
+			if cmd.Flags().NFlag() == 0 && len(args) == 0 {
+				return cmd.Help()
+			}
 			return runCert(&keyOptions, dir, certFile, keyFile, chainFile, csrFile, domains, sequentialSerial)
 		},
 	}
