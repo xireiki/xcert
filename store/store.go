@@ -152,7 +152,7 @@ func (s *Store) metaCounter(key string) (*big.Int, error) {
 
 func (s *Store) Record(serial *big.Int, subject, certType, name, certPath, keyPath string, notBefore, notAfter time.Time) error {
 	_, err := s.db.Exec(
-		`INSERT OR REPLACE INTO certs(serial, subject, type, name, status, not_before, not_after, cert_path, key_path, created_at)
+		`INSERT INTO certs(serial, subject, type, name, status, not_before, not_after, cert_path, key_path, created_at)
 		 VALUES(?, ?, ?, ?, 'V', ?, ?, ?, ?, ?)`,
 		strings.ToUpper(fmt.Sprintf("%x", serial)), subject, certType, name,
 		notBefore.UTC().Format(time.RFC3339), notAfter.UTC().Format(time.RFC3339),
