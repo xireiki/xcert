@@ -9,7 +9,6 @@ import (
 	"xcert/log"
 	"xcert/option"
 	"xcert/pki"
-	"xcert/store"
 
 	"github.com/spf13/cobra"
 )
@@ -69,7 +68,7 @@ func runInte(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir, ce
 		}
 	}
 
-	st, err := store.Open(filepath.Join(dir, store.FileName))
+	st, err := openStore(dir)
 	if err != nil {
 		return err
 	}

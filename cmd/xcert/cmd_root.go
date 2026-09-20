@@ -8,7 +8,6 @@ import (
 	"xcert/log"
 	"xcert/option"
 	"xcert/pki"
-	"xcert/store"
 
 	"github.com/spf13/cobra"
 )
@@ -87,7 +86,7 @@ func runRoot(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir str
 	if err != nil {
 		return err
 	}
-	st, err := store.Open(filepath.Join(dir, store.FileName))
+	st, err := openStore(dir)
 	if err != nil {
 		return err
 	}

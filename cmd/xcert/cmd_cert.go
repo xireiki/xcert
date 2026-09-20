@@ -14,7 +14,6 @@ import (
 	"xcert/log"
 	"xcert/option"
 	"xcert/pki"
-	"xcert/store"
 
 	"github.com/spf13/cobra"
 )
@@ -138,7 +137,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 
 	log.Info("Start generating certificate\n")
 
-	st, err := store.Open(filepath.Join(dir, store.FileName))
+	st, err := openStore(dir)
 	if err != nil {
 		return err
 	}

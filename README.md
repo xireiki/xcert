@@ -93,8 +93,9 @@ xcert <子命令> [参数]
 | 参数 | 默认值 | 说明 |
 | --- | --- | --- |
 | `--log-level` | `info` | 日志等级，可选 `trace`、`debug`、`info`、`warn`、`error`、`fatal`、`panic`，也可写作 `warning` |
+| `--legacy` | `false` | 读取旧的 `xcert.sh` 目录（`serial`、`index.txt`），详见「兼容旧的 xcert.sh 目录」 |
 
-该参数可放在任意子命令之前或之后。
+这些参数可放在任意子命令之前或之后。
 
 ### 帮助行为
 
@@ -493,13 +494,13 @@ ca
 
 ## 兼容旧的 xcert.sh 目录
 
-当 `-D` 指向由旧 `xcert.sh` 生成的 CA 目录时，工具会读取旧的文件结构与记录，以便继续签发新证书：
+当加上全局参数 `--legacy` 且 `-D` 指向由旧 `xcert.sh` 生成的 CA 目录时，工具会读取旧的文件结构与记录，以便继续签发新证书：
 
 - 私钥：兼容旧版 OpenSSL 生成的 `EC PARAMETERS` + `EC PRIVATE KEY` 文件，以及 RSA 私钥。
 - 记录：若目录中存在 `serial` 或 `index.txt`，会在首次打开时读取 `serial` 以续接 `--sequential-serial` 的计数器，并把 `index.txt` 中的已签发/已吊销记录导入 `xcert.db`。
 - 该目录结构已弃用，读取时会输出 `WARN` 级别的弃用警告。
 
-导入只发生一次（`certs` 表为空时），工具不会写回 `serial` 或 `index.txt`，新记录仍只写入 `xcert.db`。
+导入只发生一次（`certs` 表为空时），工具不会写回 `serial` 或 `index.txt`，新记录仍只写入 `xcert.db`。不加 `--legacy` 时，`serial` 与 `index.txt` 会被忽略。
 
 ## 协议符合性
 

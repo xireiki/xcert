@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 
 	"xcert/log"
+	"xcert/store"
 
 	"github.com/spf13/cobra"
 )
@@ -17,6 +18,22 @@ const (
 )
 
 var progName = filepath.Base(os.Args[0])
+
+var legacyMode bool
+
+func openStore(dir string) (*store.Store, error) {
+	st, err := store.Open(filepath.Join(dir, store.FileName))
+	if err != nil {
+		return nil, err
+	}
+	if legacyMode {
+		if err := st.LoadLegacy(dir); err != nil {
+			st.Close()
+			return nil, err
+		}
+	}
+	return st, nil
+}
 
 func newCLI() *cobra.Command {
 	var logLevel string
@@ -45,6 +62,7 @@ func newCLI() *cobra.Command {
 		},
 	}
 	root.PersistentFlags().StringVar(&logLevel, "log-level", "info", "log level (trace, debug, info, warn, error, fatal, panic)")
+	root.PersistentFlags().BoolVar(&legacyMode, "legacy", false, "read the deprecated xcert.sh serial and index.txt files")
 	root.AddCommand(newRootCommand(), newInteCommand(), newCertCommand(), newDBCommand())
 	return root
 }

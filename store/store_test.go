@@ -192,6 +192,9 @@ func TestLegacyImport(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
+	if err := s.LoadLegacy(dir); err != nil {
+		t.Fatal(err)
+	}
 
 	records, err := s.List()
 	if err != nil {

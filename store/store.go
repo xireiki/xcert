@@ -68,10 +68,6 @@ func Open(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	if err := s.importLegacy(filepath.Dir(abs)); err != nil {
-		db.Close()
-		return nil, err
-	}
 	return s, nil
 }
 
@@ -145,10 +141,10 @@ func fileExists(path string) bool {
 	return err == nil
 }
 
-// importLegacy reads the serial and index.txt files of a CA directory created
+// LoadLegacy reads the serial and index.txt files of a CA directory created
 // by the old xcert.sh script so new certificates continue the old numbering
 // and previously issued records are known. The layout is deprecated.
-func (s *Store) importLegacy(dir string) error {
+func (s *Store) LoadLegacy(dir string) error {
 	serialPath := filepath.Join(dir, "serial")
 	indexPath := filepath.Join(dir, "index.txt")
 	if !fileExists(serialPath) && !fileExists(indexPath) {

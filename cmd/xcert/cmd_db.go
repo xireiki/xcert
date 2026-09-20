@@ -39,7 +39,7 @@ func newDBCommand() *cobra.Command {
 }
 
 func openDB(dir string) (*store.Store, error) {
-	return store.Open(filepath.Join(dir, store.FileName))
+	return openStore(dir)
 }
 
 func newDBListCommand(dir *string) *cobra.Command {
