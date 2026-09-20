@@ -216,6 +216,7 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 			return err
 		}
 		if err := st.Record(serial, cert.Subject.String(), "cert", cn, cerPath, keyPath, now, cert.NotAfter); err != nil {
+			os.Remove(cerPath)
 			return err
 		}
 	}

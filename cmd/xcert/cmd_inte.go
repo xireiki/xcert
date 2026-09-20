@@ -134,10 +134,13 @@ func runInte(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir, ce
 	if err != nil {
 		return err
 	}
-	if err := pki.WriteFile(filepath.Join(dir, "chain.cer"), append(cerPEM, parentPEM...), 0644); err != nil {
+	chainPath := filepath.Join(dir, "chain.cer")
+	if err := pki.WriteFile(chainPath, append(cerPEM, parentPEM...), 0644); err != nil {
 		return err
 	}
 	if err := st.Record(serial, cert.Subject.String(), "inte", "InteCA", certPath, keyPath, now, cert.NotAfter); err != nil {
+		os.Remove(certPath)
+		os.Remove(chainPath)
 		return err
 	}
 

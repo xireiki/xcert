@@ -87,16 +87,17 @@ func runRoot(keyOptions *option.KeyOptions, caOptions *option.CAOptions, dir str
 	if err != nil {
 		return err
 	}
-	if err := pki.WriteFile(certPath, pki.EncodeCert(der), 0644); err != nil {
-		return err
-	}
-
 	st, err := store.Open(filepath.Join(dir, store.FileName))
 	if err != nil {
 		return err
 	}
 	defer st.Close()
+
+	if err := pki.WriteFile(certPath, pki.EncodeCert(der), 0644); err != nil {
+		return err
+	}
 	if err := st.Record(serial, cert.Subject.String(), "root", "RootCA", certPath, keyPath, now, cert.NotAfter); err != nil {
+		os.Remove(certPath)
 		return err
 	}
 
