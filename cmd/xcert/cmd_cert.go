@@ -157,6 +157,11 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 	cerPath := filepath.Join(domainDir, cn+".cer")
 	var parentCert *x509.Certificate
 	var parentKey crypto.Signer
+	keyPath := ""
+	if !externalCSR {
+		keyPath = filepath.Join(domainDir, cn+".key")
+	}
+
 	if !pki.Exists(cerPath) {
 		parentCert, err = pki.LoadCert(certFile)
 		if err != nil {
@@ -169,31 +174,27 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		if err != nil {
 			return err
 		}
-	}
 
-	keyPath := ""
-	csrPath := filepath.Join(domainDir, cn+".csr")
-	if externalCSR {
-		csrPEM, err := os.ReadFile(csrFile)
-		if err != nil {
-			return err
+		csrPath := filepath.Join(domainDir, cn+".csr")
+		if externalCSR {
+			csrPEM, err := os.ReadFile(csrFile)
+			if err != nil {
+				return err
+			}
+			if err := pki.WriteFile(csrPath, csrPEM, 0644); err != nil {
+				return err
+			}
+		} else {
+			keySigner, err = pki.EnsureKey(keyPath, keyOptions.Cipher, keyOptions.Bits)
+			if err != nil {
+				return err
+			}
+			if err := pki.EnsureCSR(csrPath, name, dnsNames, keySigner); err != nil {
+				return err
+			}
+			publicKey = keySigner.Public()
 		}
-		if err := pki.WriteFile(csrPath, csrPEM, 0644); err != nil {
-			return err
-		}
-	} else {
-		keyPath = filepath.Join(domainDir, cn+".key")
-		keySigner, err = pki.EnsureKey(keyPath, keyOptions.Cipher, keyOptions.Bits)
-		if err != nil {
-			return err
-		}
-		if err := pki.EnsureCSR(csrPath, name, dnsNames, keySigner); err != nil {
-			return err
-		}
-		publicKey = keySigner.Public()
-	}
 
-	if !pki.Exists(cerPath) {
 		serial, err := nextSerial(st, sequentialSerial)
 		if err != nil {
 			return err
