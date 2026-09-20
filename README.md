@@ -1,5 +1,7 @@
 # xcert
 
+[English](README.en.md) | 简体中文
+
 用 Go 实现的 X.509 证书颁发工具，用于生成自签根证书、中间证书和域名证书，并提供基于 SQLite 的证书数据库管理功能（列出、查询、删除、吊销、解除吊销、生成 CRL）。
 
 密钥与证书操作全部使用 Go 标准库完成，不依赖外部命令。
@@ -615,7 +617,8 @@ ca
 ├── Makefile
 ├── go.mod
 ├── LICENSE
-└── README.md
+├── README.md
+└── README.en.md
 ```
 
 ## AI 开发规范
