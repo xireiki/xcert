@@ -107,7 +107,8 @@ Revoked:   %s
 }
 
 func newDBDeleteCommand(dir *string) *cobra.Command {
-	return &cobra.Command{
+	var crlOptions option.CRLOptions
+	cmd := &cobra.Command{
 		Use:           "delete <serial|name>",
 		Short:         "Delete a record",
 		Args:          cobra.ExactArgs(1),
@@ -124,8 +125,35 @@ func newDBDeleteCommand(dir *string) *cobra.Command {
 				return err
 			}
 			log.Info("Deleted %s (%s)\n", record.Serial, record.Name)
+			if record.Type == "cert" {
+				removeRecordFiles(record)
+				if record.Status == "R" {
+					if err := writeCRL(*dir, &crlOptions, st); err != nil {
+						return err
+					}
+				}
+			}
 			return nil
 		},
+	}
+	addCRLFlags(cmd, &crlOptions)
+	return cmd
+}
+
+func removeRecordFiles(record store.Record) {
+	paths := []string{record.CertPath, record.KeyPath}
+	if record.CertPath != "" {
+		dir := filepath.Dir(record.CertPath)
+		base := strings.TrimSuffix(filepath.Base(record.CertPath), filepath.Ext(record.CertPath))
+		paths = append(paths, filepath.Join(dir, base+".csr"), filepath.Join(dir, "fullchain.cer"))
+	}
+	for _, path := range paths {
+		if path == "" {
+			continue
+		}
+		if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
+			log.Warn("failed to remove %s: %v\n", path, err)
+		}
 	}
 }
 

@@ -342,7 +342,7 @@ xcert <子命令> [参数]
 | `Created` | 记录创建时间 |
 | `Revoked` | 吊销时间，未吊销时为空 |
 
-### revoke / unrevoke 参数
+### delete / revoke / unrevoke 参数
 
 在 `-D` / `--dir` 之外，还支持以下参数：
 
@@ -360,7 +360,7 @@ CRL 使用 `X509 CRL` PEM 格式，CRL 编号来自数据库 `meta` 表中的独
 
 ### delete 行为
 
-`db delete` 仅删除数据库记录，不会删除对应的证书、私钥等文件。
+`db delete` 删除数据库记录；对于域名证书（`cert`），会一并删除对应的 `<CN>.cer`、`<CN>.key`、`<CN>.csr` 与 `fullchain.cer`；若被删除的记录处于已吊销状态，还会重新生成 CRL。`root`、`inte` 记录只删除数据库行，不删除 CA 文件。
 
 ## 证书能力参数详解
 
