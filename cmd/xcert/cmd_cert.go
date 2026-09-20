@@ -215,6 +215,16 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 		if err := pki.WriteFile(cerPath, cerPEM, 0644); err != nil {
 			return err
 		}
+		if err := st.Record(serial, cert.Subject.String(), "cert", cn, cerPath, keyPath, now, cert.NotAfter); err != nil {
+			return err
+		}
+	}
+
+	if !pki.Exists(fullchainPath) {
+		cerPEM, err := os.ReadFile(cerPath)
+		if err != nil {
+			return err
+		}
 		fullchain := cerPEM
 		if pki.Exists(chainFile) {
 			chainPEM, err := os.ReadFile(chainFile)
@@ -224,9 +234,6 @@ func runCert(keyOptions *option.KeyOptions, dir, certFile, keyFile, chainFile, c
 			fullchain = append(fullchain, chainPEM...)
 		}
 		if err := pki.WriteFile(fullchainPath, fullchain, 0644); err != nil {
-			return err
-		}
-		if err := st.Record(serial, cert.Subject.String(), "cert", cn, cerPath, keyPath, now, cert.NotAfter); err != nil {
 			return err
 		}
 	}

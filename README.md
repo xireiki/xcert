@@ -267,7 +267,7 @@ xcert <子命令> [参数]
 - 若 `<CN>.csr` 不存在，则生成证书请求，其中包含与证书一致的 `subjectAltName`；已存在的证书请求与当前主体或 `subjectAltName` 不一致时会重新生成。
 - 使用 CA 证书与私钥签发 `<CN>.cer`。
 - 用于签发的 CA 证书必须为 CA 证书且允许证书签名，否则报错。
-- 生成 `<CN>` 的完整证书链 `fullchain.cer`，内容为 `<CN>.cer` 与 `--chain` 指定文件内容的拼接。
+- 生成 `<CN>` 的完整证书链 `fullchain.cer`，内容为 `<CN>.cer` 与 `--chain` 指定文件内容的拼接；若 `<CN>.cer` 已存在而 `fullchain.cer` 缺失，会直接重建。
 - 将域名证书记录写入数据库，类型为 `cert`，名称为 `CN`。
 - 证书 `NotAfter` 取请求天数与签发 CA 的 `NotAfter` 中的较小值，保证不超过签发者有效期。
 - 若签发 CA 不带 SKI，则使用其公钥的 SHA-1 摘要作为 AKI。
