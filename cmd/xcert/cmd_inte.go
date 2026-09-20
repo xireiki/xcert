@@ -36,7 +36,7 @@ func newInteCommand() *cobra.Command {
 		},
 	}
 	addKeyFlags(cmd, &keyOptions, option.KeyOptions{Cipher: "ecc", Bits: 3072, Subject: defaultInteSubject, Days: 1825})
-	addCAFlags(cmd, &caOptions, option.CAOptions{KeyUsage: []string{"keyCertSign", "cRLSign"}, ExtKeyUsage: []string{"serverAuth", "clientAuth"}, PathLength: 0, Digest: "sha512", SubjectKeyID: true, AuthorityKeyID: true})
+	addCAFlags(cmd, &caOptions, option.CAOptions{KeyUsage: []string{"keyCertSign", "cRLSign"}, PathLength: 0, Digest: "sha512", SubjectKeyID: true, AuthorityKeyID: true})
 	flags := cmd.Flags()
 	flags.StringVarP(&dir, "dir", "D", ".", "certificate directory")
 	flags.StringVarP(&certFile, "cert", "c", "", "parent CA certificate")
