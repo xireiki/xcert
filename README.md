@@ -1,0 +1,457 @@
+# xcert
+
+`xcert` 是一个用 Go 实现的证书颁发工具，用于生成自签根证书、中间证书和域名证书，并提供基于 SQLite 的证书数据库管理功能（列出、查询、删除、吊销、解除吊销、生成 CRL）。
+
+本工具完全使用 Go 标准库的 `crypto` 系列包完成密钥与证书操作，不再依赖外部 `openssl` 命令。
+
+## 功能特性
+
+- 生成根 CA（`root`）、中间 CA（`inte`）、域名证书（`cert` / `sign`）
+- 支持 ECC（prime256v1 / P-256）与 RSA 私钥
+- CA 数据保存到每个 CA 目录下的 SQLite 数据库 `xcert.db`
+- 提供 `db` 子命令管理证书数据库
+- 支持吊销证书并按需生成 X.509 CRL
+- 可自定义密钥用法、扩展密钥用法、CA 路径长度、签名摘要算法等证书能力参数
+- 支持随机序列号或基于数据库计数器递增的序列号
+
+## 构建与安装
+
+要求 Go 1.27 或更高版本。
+
+```sh
+go build -o xcert .
+```
+
+将生成的 `xcert` 可执行文件放入 `PATH` 即可使用。
+
+运行测试：
+
+```sh
+go test ./...
+```
+
+## 快速开始
+
+创建一个完整的证书链（根 CA、中间 CA、域名证书）：
+
+```sh
+xcert root -o ./ca
+xcert inte -o ./ca -c ./ca/RootCA.cer -k ./ca/RootCA.key
+xcert cert -D ./ca -d example.com -d www.example.com
+```
+
+生成结果位于 `./ca` 与 `./ca/certs/example.com_ecc` 下，证书数据库为 `./ca/xcert.db`。
+
+查看已签发的证书：
+
+```sh
+xcert db list -D ./ca
+xcert db show example.com -D ./ca
+```
+
+吊销证书并生成 CRL：
+
+```sh
+xcert db revoke example.com -D ./ca
+```
+
+## 命令总览
+
+```
+xcert <子命令> [参数]
+```
+
+子命令：
+
+| 子命令 | 说明 |
+| --- | --- |
+| `root` | 创建根证书 |
+| `inte` | 创建中间证书，需由根证书或上级 CA 签发 |
+| `cert` | 创建域名证书，由中间证书签发 |
+| `sign` | 与 `cert` 等价 |
+| `db` | 管理证书数据库 |
+| `help` | 显示帮助信息 |
+
+直接执行 `xcert` 不带子命令时会输出错误并提示查看帮助；未知子命令同样会报错并提示查看帮助。
+
+`xcert help` 显示总帮助，`xcert <子命令> --help` 显示对应子命令的帮助。
+
+## 全局说明
+
+### 帮助行为
+
+- `root` 与 `inte` 子命令在不带任何参数执行时会直接输出该子命令的帮助信息，而不会生成证书。只要指定了任意参数（含任意选项），即按参数执行。
+- `cert` 与 `sign` 子命令不带参数执行时会因为缺少可用的通用名称而报错。
+- `db` 子命令不带参数执行时显示其帮助信息。
+
+### 颜色输出
+
+当环境变量 `TERM` 的值为 `xterm-256color` 时，日志级别会带颜色：`INFO` 为绿色，`WARN` 为黄色，`ERRO` 为红色。其他情况下输出纯文本。
+
+- `INFO` 与 `WARN` 输出到标准输出
+- `ERRO` 输出到标准错误
+
+### 退出码
+
+- `0`：执行成功
+- `1`：参数错误、文件缺失、证书已存在之外的处理失败等
+
+### 主体信息格式
+
+`-s` / `--subject` / `--subj` 使用 OpenSSL 风格的主体字符串，以 `/` 分隔各字段，例如：
+
+```
+/C=CN/O=Test SSL/CN=Test SSL CA
+```
+
+支持的字段键（大小写不敏感）：
+
+| 键 | 含义 |
+| --- | --- |
+| `C` | 国家（Country） |
+| `ST` 或 `S` | 省 / 州（State or Province） |
+| `L` | 城市 / 地区（Locality） |
+| `O` | 组织（Organization） |
+| `OU` | 组织单位（Organizational Unit） |
+| `CN` | 通用名称（Common Name） |
+| `emailAddress` 或 `E` | 电子邮件地址 |
+
+`C`、`ST`、`L`、`O`、`OU` 可重复出现并会累积为多值；`CN` 与 `emailAddress` 每次出现都会覆盖之前的值，因此最终取最后一次出现的结果。空字段（例如字符串中连续的 `//`）会被忽略。
+
+## root：创建根证书
+
+### 参数
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa`。其他取值会报错 |
+| `--rsa-bit-number` | `3072` | 生成 RSA 私钥时的位数，仅在 `--cipher rsa` 时生效，最小 512 |
+| `-s`, `--subject`, `--subj` | `/C=CN/O=Test SSL/CN=Test SSL CA` | 证书主体信息 |
+| `--days` | `3650` | 证书有效期，单位为天 |
+| `-o`, `--output` | `.` | 文件保存目录 |
+| `--key-usage` | 空 | 密钥用法扩展，逗号分隔，多个值取并集 |
+| `--ext-key-usage` | 空 | 扩展密钥用法，逗号分隔 |
+| `--pathlen` | `-1` | CA 路径长度限制，`-1` 表示不设置该限制 |
+| `--md` | `sha512` | 签名摘要算法，可选 `sha256`、`sha384`、`sha512` |
+| `--subject-key-id` | `true` | 是否包含主体密钥标识符（SKI） |
+| `--authority-key-id` | `true` | 是否包含颁发者密钥标识符（AKI）。根证书为自签，默认不会附带 AKI，该参数对根证书无实际作用 |
+| `-h`, `--help` | | 显示帮助 |
+
+### 行为
+
+- 若目标目录下已存在 `RootCA.cer`，输出 `RootCA.cer` 已存在的警告并直接返回，不覆盖。
+- 创建目录及 `<output>/newcerts`、`<output>/crl`。
+- 若 `<output>/RootCA.key` 不存在，则按 `--cipher` 生成私钥。
+- 生成自签根证书 `RootCA.cer`，签名摘要算法由 `--md` 决定。
+- 将根证书记录写入 `<output>/xcert.db`，类型为 `root`，名称为 `RootCA`。
+- 根证书使用随机序列号（128 位）。
+
+根证书默认不包含 `keyUsage` 与 `extendedKeyUsage` 扩展，`basicConstraints` 为 `CA:TRUE`。默认包含 SKI。
+
+### 输出文件
+
+| 文件 | 说明 |
+| --- | --- |
+| `RootCA.key` | 私钥，权限 0600 |
+| `RootCA.cer` | 自签根证书 |
+| `xcert.db` | 证书数据库 |
+| `newcerts/` | 预留目录 |
+| `crl/` | CRL 输出目录 |
+
+## inte：创建中间证书
+
+### 参数
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa` |
+| `--rsa-bit-number` | `3072` | 生成 RSA 私钥时的位数 |
+| `-s`, `--subject`, `--subj` | `/C=CN/O=Test SSL/CN=Test Inte CA` | 证书主体信息 |
+| `--days` | `1825` | 证书有效期，单位为天 |
+| `-o`, `--output` | `.` | 文件保存目录 |
+| `-c`, `--cert` | 无，必填 | 签发中间证书的上级 CA 证书路径 |
+| `-k`, `--key` | 无，必填 | 签发中间证书的上级 CA 私钥路径 |
+| `-R`, `--rand-serial` | `false` | 使用随机序列号，不占用数据库递增计数器 |
+| `--key-usage` | `keyCertSign,cRLSign` | 密钥用法扩展 |
+| `--ext-key-usage` | `serverAuth,clientAuth` | 扩展密钥用法 |
+| `--pathlen` | `0` | CA 路径长度限制，`-1` 表示不设置 |
+| `--md` | `sha512` | 签名摘要算法 |
+| `--subject-key-id` | `true` | 是否包含 SKI |
+| `--authority-key-id` | `true` | 是否包含 AKI |
+| `-h`, `--help` | | 显示帮助 |
+
+### 行为
+
+- 若目标目录下已存在 `InteCA.cer`，输出已存在的警告并直接返回，不覆盖。
+- `-c` 与 `-k` 为必填项，缺失或文件不存在时报错。
+- 创建目录及 `<output>/newcerts`、`<output>/crl`、`<output>/certs`。
+- 若 `<output>/InteCA.key` 不存在，则按 `--cipher` 生成私钥。
+- 生成证书请求 `InteCA.csr`（若不存在）。
+- 使用上级 CA 证书与私钥签发 `InteCA.cer`。
+- 生成证书链 `chain.cer`，内容为 `InteCA.cer` 与上级 CA 证书的拼接。
+- 将中间证书记录写入数据库，类型为 `inte`，名称为 `InteCA`。
+
+默认序列号从数据库计数器读取并递增；使用 `-R` 时改为随机序列号且不改变计数器。
+
+### 输出文件
+
+| 文件 | 说明 |
+| --- | --- |
+| `InteCA.key` | 私钥，权限 0600 |
+| `InteCA.csr` | 证书请求 |
+| `InteCA.cer` | 中间证书 |
+| `chain.cer` | 中间证书与上级 CA 证书拼接的证书链 |
+| `xcert.db` | 证书数据库 |
+| `certs/` | 域名证书目录 |
+| `newcerts/`, `crl/` | 预留目录 |
+
+## cert / sign：创建域名证书
+
+`sign` 为 `cert` 的别名，参数与行为完全一致。
+
+### 参数
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `-C`, `--cipher` | `ecc` | 私钥类型，可选 `ecc` 或 `rsa` |
+| `--rsa-bit-number` | `3072` | 生成 RSA 私钥时的位数 |
+| `-s`, `--subject`, `--subj` | `/C=CN` | 证书主体信息 |
+| `--days` | `90` | 证书有效期，单位为天 |
+| `-D`, `--dir` | `.` | CA 目录，用于定位数据库、CA 证书、CA 私钥与证书链 |
+| `-c`, `--cert` | `<dir>/InteCA.cer` | 签发证书所用的 CA 证书 |
+| `-k`, `--key` | `<dir>/InteCA.key` | 签发证书所用的 CA 私钥 |
+| `--chain` | `<dir>/chain.cer` | 用于拼接 `fullchain.cer` 的证书链 |
+| `-d`, `--domain` | 无 | 域名，可重复指定 |
+| `-R`, `--rand-serial` | `false` | 使用随机序列号，不占用数据库递增计数器 |
+| `-h`, `--help` | | 显示帮助 |
+
+注意：`cert` 命令使用 `-D` / `--dir` 指定 CA 目录。其帮助文本仍保留历史遗留的 `-o` 行，该选项在当前 `cert` 命令中不接受。
+
+### 名称与 SAN 规则
+
+- 若通过 `-d` 指定了至少一个域名，证书目录名与文件名中的通用名称取第一个域名。
+- 若未指定 `-d`，则取 `--subject` 中的 `CN` 字段。
+- 若两者都为空，报错。
+- 只有当 `-d` 指定的域名数量大于 1 时，才会写入 `subjectAltName` 扩展，内容为全部域名；只指定一个域名时不写入 SAN。
+- 证书主体（Subject）始终为 `--subject` 的解析结果，域名不会自动写入主体的 `CN` 字段。
+
+### 行为
+
+- 计算通用名称 `CN`，确定输出目录 `<dir>/certs/<CN>_<cipher>`。
+- 若该目录下已存在 `fullchain.cer`，输出已存在的警告并直接返回。
+- 若 `<CN>.key` 不存在，则按 `--cipher` 生成私钥。
+- 若 `<CN>.csr` 不存在，则生成证书请求。
+- 使用 CA 证书与私钥签发 `<CN>.cer`。
+- 生成 `<CN> 的完整证书链 fullchain.cer`，内容为 `<CN>.cer` 与 `--chain` 指定文件内容的拼接。
+- 将域名证书记录写入数据库，类型为 `cert`，名称为 `CN`。
+
+默认密钥用法为 `digitalSignature,keyEncipherment`，扩展密钥用法为 `serverAuth,clientAuth`，`basicConstraints` 为 `CA:FALSE`。签名摘要算法固定为 SHA-512。
+
+### 输出文件
+
+在 `<dir>/certs/<CN>_<cipher>/` 下：
+
+| 文件 | 说明 |
+| --- | --- |
+| `<CN>.key` | 私钥，权限 0600 |
+| `<CN>.csr` | 证书请求 |
+| `<CN>.cer` | 域名证书 |
+| `fullchain.cer` | 域名证书与证书链拼接的完整链 |
+
+## db：管理证书数据库
+
+数据库文件固定为 CA 目录下的 `xcert.db`，通过持久参数 `-D` / `--dir` 指定 CA 目录，默认 `.`。该参数可放在子命令之前或之后。
+
+### 子命令
+
+| 子命令 | 说明 |
+| --- | --- |
+| `db list` | 列出数据库中的全部记录 |
+| `db show <serial\|name>` | 按序列号或名称显示一条记录 |
+| `db delete <serial\|name>` | 按序列号或名称删除一条记录 |
+| `db revoke <serial\|name>` | 将记录状态标记为已吊销并重新生成 CRL |
+| `db unrevoke <serial\|name>` | 将记录状态恢复为有效并重新生成 CRL |
+
+`<serial|name>` 支持十六进制序列号（大小写不敏感）或证书名称。若名称匹配到多条记录，会提示结果有歧义并要求改用序列号。
+
+### db list 输出
+
+按插入顺序输出表格，列为：
+
+| 列 | 说明 |
+| --- | --- |
+| `SERIAL` | 序列号（十六进制，大写） |
+| `TYPE` | 类型：`root`、`inte`、`cert` |
+| `NAME` | 名称：`RootCA`、`InteCA` 或域名 |
+| `STATUS` | 状态：`V` 有效、`R` 已吊销 |
+| `NOT_AFTER` | 到期时间，RFC 3339 格式 |
+
+### db show 输出
+
+输出单条记录的全部字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `Serial` | 序列号 |
+| `Type` | 类型 |
+| `Name` | 名称 |
+| `Subject` | 主体 |
+| `Status` | 状态 |
+| `NotBefore` | 生效时间 |
+| `NotAfter` | 到期时间 |
+| `Cert` | 证书文件路径 |
+| `Key` | 私钥文件路径 |
+| `Created` | 记录创建时间 |
+| `Revoked` | 吊销时间，未吊销时为空 |
+
+### revoke / unrevoke 参数
+
+在 `-D` / `--dir` 之外，还支持以下参数：
+
+| 参数 | 默认值 | 说明 |
+| --- | --- | --- |
+| `--ca-cert` | `<dir>/InteCA.cer` | 用于签发 CRL 的 CA 证书 |
+| `--ca-key` | `<dir>/InteCA.key` | 用于签发 CRL 的 CA 私钥 |
+| `--crl` | `<dir>/crl/<CA 文件名>.crl` | CRL 输出路径 |
+| `--days` | `30` | CRL 的 `nextUpdate` 相对于当前时间的天数 |
+
+`revoke` 会先将匹配记录的状态更新为 `R` 并记录吊销时间，然后重新生成 CRL；`unrevoke` 会先将状态恢复为 `V` 并清除吊销时间，然后重新生成 CRL。若 CRL 签发所需的 CA 证书或私钥不存在，命令会报错，此时状态修改已生效。
+
+CRL 使用 `X509 CRL` PEM 格式，CRL 编号来自数据库 `meta` 表中的独立递增计数器。CRL 内容包含数据库中所有状态为 `R` 的记录。
+
+### delete 行为
+
+`db delete` 仅删除数据库记录，不会删除对应的证书、私钥等文件。
+
+## 证书能力参数详解
+
+`--key-usage`、`--ext-key-usage`、`--pathlen`、`--md`、`--subject-key-id`、`--authority-key-id` 仅 `root` 与 `inte` 支持。
+
+### --key-usage
+
+逗号分隔的密钥用法名称，多个值取并集。可用取值：
+
+| 取值 | 含义 |
+| --- | --- |
+| `digitalSignature` | 数字签名 |
+| `nonRepudiation` / `contentCommitment` | 不可否认 / 内容承诺 |
+| `keyEncipherment` | 密钥加密 |
+| `dataEncipherment` | 数据加密 |
+| `keyAgreement` | 密钥协商 |
+| `keyCertSign` | 证书签名 |
+| `cRLSign` / `crlSign` | CRL 签名 |
+| `encipherOnly` | 仅加密 |
+| `decipherOnly` | 仅解密 |
+
+未识别的取值会报错。
+
+### --ext-key-usage
+
+逗号分隔的扩展密钥用法名称。可用取值：
+
+| 取值 | 含义 |
+| --- | --- |
+| `serverAuth` | TLS 服务端认证 |
+| `clientAuth` | TLS 客户端认证 |
+| `codeSigning` | 代码签名 |
+| `emailProtection` | 电子邮件保护 |
+| `ipsecEndSystem` | IPsec 终端系统 |
+| `ipsecTunnel` | IPsec 隧道 |
+| `ipsecUser` | IPsec 用户 |
+| `timeStamping` | 时间戳 |
+| `ocspSigning` / `OCSPSigning` | OCSP 签名 |
+| `any` / `anyExtendedKeyUsage` | 任意用途 |
+
+未识别的取值会报错。
+
+### --pathlen
+
+CA 路径长度限制。取值 `-1` 表示不写入路径长度限制；`0` 表示只允许签发终端证书，不允许再签发下级 CA；大于 `0` 表示允许的下级 CA 层级数。
+
+### --md
+
+签名摘要算法，可选 `sha256`、`sha384`、`sha512`。会根据密钥类型自动选择对应算法（RSA 使用 RSASSA-PKCS1-v1_5，ECC 使用 ECDSA）。
+
+### --subject-key-id 与 --authority-key-id
+
+用于控制是否包含 SKI 与 AKI 扩展。
+
+Go 标准库在生成 CA 证书时会强制加入 SKI，并在由上级 CA 签发时根据父证书的 SKI 自动派生 AKI。为支持关闭这两个扩展：
+
+- 当 `--subject-key-id=false` 时，工具改为手动编码 `basicConstraints` 扩展，并令标准库不将证书视为 CA 以跳过自动生成 SKI。生成的证书仍带有正确的 `CA:TRUE` 扩展，证书链可正常验证。
+- 当 `--authority-key-id=false` 时，工具在签发前清空父证书对象中的 SKI，使标准库无法派生出 AKI。
+
+## 密钥与文件格式
+
+- ECC 私钥：secp256r1（prime256v1 / P-256），PEM 类型 `EC PRIVATE KEY`
+- RSA 私钥：PEM 类型 `RSA PRIVATE KEY`（PKCS#1）
+- 证书：PEM 类型 `CERTIFICATE`
+- 证书请求：PEM 类型 `CERTIFICATE REQUEST`
+- CRL：PEM 类型 `X509 CRL`
+- 私钥文件权限为 `0600`，其余文件权限为 `0644`
+
+## 目录结构示例
+
+执行 `xcert root -o ./ca`、`xcert inte -o ./ca -c ./ca/RootCA.cer -k ./ca/RootCA.key`、`xcert cert -D ./ca -d example.com -d www.example.com` 后，目录结构如下：
+
+```
+ca
+├── RootCA.key
+├── RootCA.cer
+├── InteCA.key
+├── InteCA.csr
+├── InteCA.cer
+├── chain.cer
+├── xcert.db
+├── certs
+│   └── example.com_ecc
+│       ├── example.com.key
+│       ├── example.com.csr
+│       ├── example.com.cer
+│       └── fullchain.cer
+├── newcerts
+└── crl
+    └── InteCA.crl
+```
+
+## 数据库结构
+
+`xcert.db` 为 SQLite 数据库，包含以下表。
+
+`meta` 表：
+
+| 列 | 类型 | 说明 |
+| --- | --- | --- |
+| `key` | TEXT | 主键，计数器名称，`serial` 或 `crl` |
+| `value` | TEXT | 计数器当前值，十六进制 |
+
+`certs` 表：
+
+| 列 | 类型 | 说明 |
+| --- | --- | --- |
+| `id` | INTEGER | 主键，自增 |
+| `serial` | TEXT | 序列号，十六进制大写 |
+| `subject` | TEXT | 主体 |
+| `type` | TEXT | 类型：`root`、`inte`、`cert` |
+| `name` | TEXT | 名称 |
+| `status` | TEXT | 状态：`V` 或 `R` |
+| `not_before` | TEXT | 生效时间，RFC 3339 |
+| `not_after` | TEXT | 到期时间，RFC 3339 |
+| `cert_path` | TEXT | 证书路径 |
+| `key_path` | TEXT | 私钥路径 |
+| `created_at` | TEXT | 记录创建时间，RFC 3339 |
+| `revoked_at` | TEXT | 吊销时间，RFC 3339，未吊销为空 |
+
+序列号计数器 `serial` 初始为 `01`，每签发一张中间证书或域名证书后递增；`root` 始终使用随机序列号，不占用该计数器。使用 `-R` / `--rand-serial` 时同样使用随机序列号且不递增计数器。CRL 编号使用独立的 `crl` 计数器。
+
+## 与旧版 shell 脚本的差异
+
+- 不再调用外部 `openssl` 命令，全部使用 Go 标准库实现。
+- 不再生成 `index.txt` 与 `serial` 文件，相关数据改为存放于 `xcert.db`。
+- 新增 `db` 子命令与 CRL 生成能力。
+- 新增证书能力参数。
+- `cert` 命令的 CA 证书、私钥与证书链默认路径会随 `-D` / `--dir` 一起变化。
+
+## 许可证
+
+本项目采用 MIT 许可证，详见 `LICENSE` 文件。
